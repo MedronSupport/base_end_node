@@ -1,0 +1,8 @@
+../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_bus.h:449:22:LL_AHB2_GRP1_EnableClock	24	static
+../LoRaWAN/Target/radio_board_if.c:59:9:RBI_Init	32	static
+../LoRaWAN/Target/radio_board_if.c:101:9:RBI_DeInit	16	static
+../LoRaWAN/Target/radio_board_if.c:131:9:RBI_ConfigRFSwitch	24	static
+../LoRaWAN/Target/radio_board_if.c:175:9:RBI_GetTxConfig	16	static
+../LoRaWAN/Target/radio_board_if.c:201:9:RBI_IsTCXO	16	static
+../LoRaWAN/Target/radio_board_if.c:227:9:RBI_IsDCDC	16	static
+../LoRaWAN/Target/radio_board_if.c:253:9:RBI_GetRFOMaxPowerConfig	24	static
