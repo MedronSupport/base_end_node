@@ -78,9 +78,8 @@ typedef enum
   CFG_SEQ_Task_LmHandlerProcess,
   CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent,
   CFG_SEQ_Task_LoRaStoreContextEvent,
-  CFG_SEQ_Task_LoRaStopJoinEvent,
   /* USER CODE BEGIN CFG_SEQ_Task_Id_t */
-
+  CFG_SEQ_Task_LoRaRejoinEvent,
   /* USER CODE END CFG_SEQ_Task_Id_t */
   CFG_SEQ_Task_NBR
 } CFG_SEQ_Task_Id_t;

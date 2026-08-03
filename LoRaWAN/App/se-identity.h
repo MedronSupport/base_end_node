@@ -105,12 +105,12 @@ extern "C" {
 /*!
  * Application root key
  */
-#define LORAWAN_APP_KEY                                    2B,7E,15,16,28,AE,D2,A6,AB,F7,15,88,09,CF,4F,3C
+#define LORAWAN_APP_KEY                                    8E,3D,D0,5E,B8,14,56,D2,15,26,C9,B7,DA,13,21,BC
 
 /*!
  * Network root key
  */
-#define LORAWAN_NWK_KEY                                    2B,7E,15,16,28,AE,D2,A6,AB,F7,15,88,09,CF,4F,3C
+#define LORAWAN_NWK_KEY                                    8E,3D,D0,5E,B8,14,56,D2,15,26,C9,B7,DA,13,21,BC
 
 /*!
  * Forwarding Network session key

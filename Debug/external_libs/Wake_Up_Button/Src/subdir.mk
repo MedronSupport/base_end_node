@@ -5,23 +5,23 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
-../Utilities/timer/stm32_timer.c 
+../external_libs/Wake_Up_Button/Src/wake_up_button.c 
 
 OBJS += \
-./Utilities/timer/stm32_timer.o 
+./external_libs/Wake_Up_Button/Src/wake_up_button.o 
 
 C_DEPS += \
-./Utilities/timer/stm32_timer.d 
+./external_libs/Wake_Up_Button/Src/wake_up_button.d 
 
 
 # Each subdirectory must supply rules for building sources it contributes
-Utilities/timer/%.o Utilities/timer/%.su Utilities/timer/%.cyclo: ../Utilities/timer/%.c Utilities/timer/subdir.mk
+external_libs/Wake_Up_Button/Src/%.o external_libs/Wake_Up_Button/Src/%.su external_libs/Wake_Up_Button/Src/%.cyclo: ../external_libs/Wake_Up_Button/Src/%.c external_libs/Wake_Up_Button/Src/subdir.mk
 	arm-none-eabi-gcc "$<" -mcpu=cortex-m4 -std=gnu11 -g3 -DDEBUG -DCORE_CM4 -DUSE_HAL_DRIVER -DSTM32WLE5xx -c -I../Core/Inc -I../Drivers/STM32WLxx_HAL_Driver/Inc -I../Drivers/STM32WLxx_HAL_Driver/Inc/Legacy -I../Drivers/CMSIS/Device/ST/STM32WLxx/Include -I../Drivers/CMSIS/Include -I../LoRaWAN/App -I../LoRaWAN/Target -I../Utilities/trace/adv_trace -I../Utilities/misc -I../Utilities/sequencer -I../Utilities/timer -I../Utilities/lpm/tiny_lpm -I../Middlewares/Third_Party/LoRaWAN/LmHandler/Packages -I../Middlewares/Third_Party/LoRaWAN/Crypto -I../Middlewares/Third_Party/LoRaWAN/Mac/Region -I../Middlewares/Third_Party/LoRaWAN/Mac -I../Middlewares/Third_Party/LoRaWAN/LmHandler -I../Middlewares/Third_Party/LoRaWAN/Utilities -I../Middlewares/Third_Party/SubGHz_Phy -I../Middlewares/Third_Party/SubGHz_Phy/stm32_radio_driver -I"C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/Wake_Up_Button/Inc" -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"$(@:%.o=%.d)" -MT"$@" --specs=nano.specs -mfloat-abi=soft -mthumb -o "$@"
 
-clean: clean-Utilities-2f-timer
+clean: clean-external_libs-2f-Wake_Up_Button-2f-Src
 
-clean-Utilities-2f-timer:
-	-$(RM) ./Utilities/timer/stm32_timer.cyclo ./Utilities/timer/stm32_timer.d ./Utilities/timer/stm32_timer.o ./Utilities/timer/stm32_timer.su
+clean-external_libs-2f-Wake_Up_Button-2f-Src:
+	-$(RM) ./external_libs/Wake_Up_Button/Src/wake_up_button.cyclo ./external_libs/Wake_Up_Button/Src/wake_up_button.d ./external_libs/Wake_Up_Button/Src/wake_up_button.o ./external_libs/Wake_Up_Button/Src/wake_up_button.su
 
-.PHONY: clean-Utilities-2f-timer
+.PHONY: clean-external_libs-2f-Wake_Up_Button-2f-Src
 

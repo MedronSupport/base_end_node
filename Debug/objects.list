@@ -88,3 +88,4 @@
 "./Utilities/sequencer/stm32_seq.o"
 "./Utilities/timer/stm32_timer.o"
 "./Utilities/trace/adv_trace/stm32_adv_trace.o"
+"./external_libs/Wake_Up_Button/Src/wake_up_button.o"

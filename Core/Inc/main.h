@@ -64,9 +64,7 @@ void Error_Handler(void);
 #define USARTx_RX_GPIO_Port GPIOB
 #define LED1_Pin GPIO_PIN_5
 #define LED1_GPIO_Port GPIOB
-#define BUT1_Pin GPIO_PIN_13
-#define BUT1_GPIO_Port GPIOB
-#define BUT1_EXTI_IRQn EXTI15_10_IRQn
+
 #define USARTx_TX_Pin GPIO_PIN_6
 #define USARTx_TX_GPIO_Port GPIOB
 #define RF_CTRL1_Pin GPIO_PIN_4

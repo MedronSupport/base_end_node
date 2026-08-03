@@ -22,6 +22,7 @@
 #include "stm32wlxx_it.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "wake_up_button.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -250,11 +251,13 @@ void EXTI15_10_IRQHandler(void)
   /* USER CODE BEGIN EXTI15_10_IRQn 0 */
 
   /* USER CODE END EXTI15_10_IRQn 0 */
-  HAL_GPIO_EXTI_IRQHandler(BUT1_Pin);
+
   /* USER CODE BEGIN EXTI15_10_IRQn 1 */
 
   /* USER CODE END EXTI15_10_IRQn 1 */
 }
+
+
 
 /**
   * @brief This function handles RTC Alarms (A and B) Interrupt.
@@ -285,5 +288,8 @@ void SUBGHZ_Radio_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-
+void EXTI0_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(WakeUpButtonPin);
+}
 /* USER CODE END 1 */

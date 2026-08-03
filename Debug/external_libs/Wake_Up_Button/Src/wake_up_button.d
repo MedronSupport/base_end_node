@@ -1,4 +1,6 @@
-Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
+external_libs/Wake_Up_Button/Src/wake_up_button.o: \
+ ../external_libs/Wake_Up_Button/Src/wake_up_button.c \
+ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/Wake_Up_Button/Inc/wake_up_button.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal.h \
  ../Core/Inc/stm32wlxx_hal_conf.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_dma.h \
@@ -38,12 +40,8 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_spi.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart_ex.h \
- ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h \
- ../Core/Inc/adc.h ../Core/Inc/main.h ../Core/Inc/dma.h \
- ../LoRaWAN/App/app_lorawan.h ../Core/Inc/rtc.h ../Core/Inc/usart.h \
- ../Core/Inc/gpio.h \
- C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/Wake_Up_Button/Inc/wake_up_button.h
-../Core/Inc/main.h:
+ ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h
+C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/Wake_Up_Button/Inc/wake_up_button.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal.h:
 ../Core/Inc/stm32wlxx_hal_conf.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_dma.h:
@@ -84,11 +82,3 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart_ex.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h:
-../Core/Inc/adc.h:
-../Core/Inc/main.h:
-../Core/Inc/dma.h:
-../LoRaWAN/App/app_lorawan.h:
-../Core/Inc/rtc.h:
-../Core/Inc/usart.h:
-../Core/Inc/gpio.h:
-C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/Wake_Up_Button/Inc/wake_up_button.h:

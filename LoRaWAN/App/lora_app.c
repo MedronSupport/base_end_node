@@ -36,11 +36,16 @@
 #include "flash_if.h"
 
 /* USER CODE BEGIN Includes */
-
+#include "subghz.h"
+#include "wake_up_button.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
 /* USER CODE BEGIN EV */
+
+/**
+  * @brief LoRaWAN application version
+  */
 
 /* USER CODE END EV */
 
@@ -88,7 +93,8 @@ typedef enum TxEventType_e
 #define LORAWAN_NVM_BASE_ADDRESS                    ((void *)0x0803F000UL)
 
 /* USER CODE BEGIN PD */
-
+#define JOIN_RETRY_MAX      3       /* ard arda otomatik deneme say\u0131s\u0131 */
+#define JOIN_RETRY_DELAY    3000   /* otomatik denemeler aras\u0131 bekleme, ms */
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -215,7 +221,8 @@ static void OnPingSlotPeriodicityChanged(uint8_t pingSlotPeriodicity);
 static void OnSystemReset(void);
 
 /* USER CODE BEGIN PFP */
-
+static void TryJoin(void);
+static void OnJoinRetryTimerEvent(void *context);
 /* USER CODE END PFP */
 
 /* Private variables ---------------------------------------------------------*/
@@ -293,6 +300,7 @@ static UTIL_TIMER_Object_t StopJoinTimer;
 /**
   * @brief User application buffer
   */
+
 static uint8_t AppDataBuffer[LORAWAN_APP_DATA_BUFFER_MAX_SIZE];
 /**
   * @brief User application data structure
@@ -302,6 +310,9 @@ static LmHandlerAppData_t AppData = { 0, 0, AppDataBuffer };
   * @brief Uplink counter, sent as the first payload byte
   */
 static uint8_t UplinkCounter = 0;
+
+static UTIL_TIMER_Object_t JoinRetryTimer;
+static uint8_t JoinRetryCount = 0;
 /* USER CODE END PV */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -312,6 +323,20 @@ static uint8_t UplinkCounter = 0;
 void LoRaWAN_Init(void)
 {
   /* USER CODE BEGIN LoRaWAN_Init_LV */
+	  APP_LOG(TS_OFF, VLEVEL_M, "APP_VERSION:        V%X\r\n",
+	          (uint8_t)APP_VERSION);
+
+	  /* Get MW LoraWAN info */
+	  APP_LOG(TS_OFF, VLEVEL_M, "MW_LORAWAN_VERSION: V%X.%X.%X\r\n",
+	          (uint8_t)(LORAWAN_VERSION >> APP_VERSION_MAIN_SHIFT),
+	          (uint8_t)(LORAWAN_VERSION >> APP_VERSION_SUB1_SHIFT),
+	          (uint8_t)(LORAWAN_VERSION >> APP_VERSION_SUB2_SHIFT));
+
+	  /* Get MW SubGhz_Phy info */
+	  APP_LOG(TS_OFF, VLEVEL_M, "MW_RADIO_VERSION:   V%X.%X.%X\r\n",
+	          (uint8_t)(SUBGHZ_PHY_VERSION >> APP_VERSION_MAIN_SHIFT),
+	          (uint8_t)(SUBGHZ_PHY_VERSION >> APP_VERSION_SUB1_SHIFT),
+	          (uint8_t)(SUBGHZ_PHY_VERSION >> APP_VERSION_SUB2_SHIFT));
 
   /* USER CODE END LoRaWAN_Init_LV */
 
@@ -319,13 +344,13 @@ void LoRaWAN_Init(void)
 
   /* USER CODE END LoRaWAN_Init_1 */
 
-  UTIL_TIMER_Create(&StopJoinTimer, JOIN_TIME, UTIL_TIMER_ONESHOT, OnStopJoinTimerEvent, NULL);
-
+ // UTIL_TIMER_Create(&StopJoinTimer, JOIN_TIME, UTIL_TIMER_ONESHOT, OnStopJoinTimerEvent, NULL);
+  UTIL_TIMER_Create(&JoinRetryTimer, JOIN_RETRY_DELAY, UTIL_TIMER_ONESHOT, OnJoinRetryTimerEvent, NULL);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LmHandlerProcess), UTIL_SEQ_RFU, LmHandlerProcess);
 
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), UTIL_SEQ_RFU, SendTxData);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaStoreContextEvent), UTIL_SEQ_RFU, StoreContext);
-  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaStopJoinEvent), UTIL_SEQ_RFU, StopJoin);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaRejoinEvent), UTIL_SEQ_RFU, TryJoin);
 
   /* Init Info table used by LmHandler*/
   LoraInfo_Init();
@@ -360,25 +385,64 @@ void LoRaWAN_Init(void)
 
 /* USER CODE BEGIN PB_Callbacks */
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-  switch (GPIO_Pin)
-  {
-    case  BUT1_Pin:
-      /* BOOT push-button (PB13): the only user button of the Wio-E5 mini.
-         Requests an extra uplink on top of the periodic one. */
-      UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), CFG_SEQ_Prio_0);
-      break;
-    default:
-      break;
-  }
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+	switch (GPIO_Pin) {
+	case WakeUpButtonPin:
+		static uint32_t lastButtonTick = 0U;
+		uint32_t currentTick;
+
+		if (GPIO_Pin != WakeUpButtonPin) {
+			return;
+		}
+
+		currentTick = HAL_GetTick();
+
+		/* Son geçerli kesmeden sonra 50 ms geçmediyse yok say */
+		if ((uint32_t) (currentTick - lastButtonTick) < WAKE_UP_BUTTON_DEBOUNCE_MS) {
+			return;
+		}
+
+		/* Falling-edge sonrası buton gerçekten LOW mu kontrol et */
+		if (HAL_GPIO_ReadPin(WakeUpButtonPort, WakeUpButtonPin)
+				!= GPIO_PIN_RESET) {
+			return;
+		}
+
+		lastButtonTick = currentTick;
+		 APP_LOG(TS_OFF, VLEVEL_M, "Butona basildi....\r\n");
+		/* Geçerli buton basma işlemi */
+		UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent),
+				CFG_SEQ_Prio_0);
+		break;
+	default:
+		break;
+	}
 }
 
 /* USER CODE END PB_Callbacks */
 
 /* Private functions ---------------------------------------------------------*/
 /* USER CODE BEGIN PrFD */
+static void TryJoin(void)
+{
+  APP_LOG(TS_OFF, VLEVEL_M, "###### TryJoin() tetiklendi - zorla rejoin\r\n");
+  UTIL_TIMER_Stop(&TxTimer);
 
+  if (LORAMAC_HANDLER_SUCCESS != LmHandlerStop())
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "LmHandler Stop on going ...\r\n");
+  }
+
+  LmHandlerConfigure(&LmHandlerParams);
+  LmHandlerJoin(ActivationType, true);   /* ActivationType hi\u00e7 de\u011fi\u015ftirilmiyor, sadece yeniden join */
+
+  UTIL_TIMER_Start(&TxTimer);
+}
+
+static void OnJoinRetryTimerEvent(void *context)
+{
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaRejoinEvent), CFG_SEQ_Prio_0);
+}
 /* USER CODE END PrFD */
 
 static void OnRxData(LmHandlerAppData_t *appData, LmHandlerRxParams_t *params)
@@ -403,6 +467,13 @@ static void OnRxData(LmHandlerAppData_t *appData, LmHandlerRxParams_t *params)
 static void SendTxData(void)
 {
   /* USER CODE BEGIN SendTxData_1 */
+	  if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET)
+	  {
+	    APP_LOG(TS_ON, VLEVEL_L, "Henuz join olunmadi, gonderim yerine rejoin deneniyor\r\n");
+	    JoinRetryCount = 0;
+	    UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaRejoinEvent), CFG_SEQ_Prio_0);
+	    return;
+	  }
 	 LmHandlerErrorStatus_t status = LORAMAC_HANDLER_ERROR;
 		  uint16_t voltage = SYS_GetBatteryLevel();           /* mV                      */
 		  int16_t temperature = SYS_GetTemperatureLevel();    /* signed Q8.8, in degC    */
@@ -465,27 +536,46 @@ static void OnTxTimerEvent(void *context)
 
 static void OnTxData(LmHandlerTxParams_t *params)
 {
-  /* USER CODE BEGIN OnTxData_1 */
-  /* USER CODE END OnTxData_1 */
+  if ((params != NULL) && (params->MsgType == LORAMAC_HANDLER_CONFIRMED_MSG))
+  {
+    if (params->AckReceived == 0)
+    {
+      APP_LOG(TS_OFF, VLEVEL_M, "###### CONFIRMED TX BASARISIZ - ACK ALINAMADI (uplink #%d, status=%d)\r\n",
+              (int)params->UplinkCounter, (int)params->Status);
+      /* buraya: RFID kuyruğundan silme, retry sayaci, vs. */
+    }
+    else
+    {
+      APP_LOG(TS_OFF, VLEVEL_M, "CONFIRMED TX: ACK alindi (uplink #%d)\r\n",
+              (int)params->UplinkCounter);
+    }
+  }
 }
 
-static void OnJoinRequest(LmHandlerJoinParams_t *joinParams)
-{
-  /* USER CODE BEGIN OnJoinRequest_1 */
-	if (joinParams != NULL)
-	  {
-	    if (joinParams->Status == LORAMAC_HANDLER_SUCCESS)
-	    {
-	      APP_LOG(TS_OFF, VLEVEL_M, "\r\n###### = JOINED = %s ======\r\n",
-	              (joinParams->Mode == ACTIVATION_TYPE_ABP) ? "ABP " : "OTAA");
-	      HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET);
-	    }
-	    else
-	    {
-	      APP_LOG(TS_OFF, VLEVEL_M, "\r\n###### = JOIN FAILED\r\n");
-	    }
-	  }
-  /* USER CODE END OnJoinRequest_1 */
+static void OnJoinRequest(LmHandlerJoinParams_t *joinParams) {
+	/* USER CODE BEGIN OnJoinRequest_1 */
+	if (joinParams != NULL) {
+		if (joinParams->Status == LORAMAC_HANDLER_SUCCESS) {
+			JoinRetryCount = 0;
+			APP_LOG(TS_OFF, VLEVEL_M, "\r\n###### = JOINED = %s ======\r\n",
+					(joinParams->Mode == ACTIVATION_TYPE_ABP) ? "ABP " : "OTAA");
+			HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET);
+		} else {
+			APP_LOG(TS_OFF, VLEVEL_M, "\r\n###### = JOIN FAILED\r\n");
+			if (JoinRetryCount < JOIN_RETRY_MAX) // <-- buradan itibaren yeni eklenen kısım
+			{
+				JoinRetryCount++;
+				APP_LOG(TS_OFF, VLEVEL_M,
+						"Rejoin deneme %d/%d, %d sn sonra\r\n", JoinRetryCount,
+						JOIN_RETRY_MAX, JOIN_RETRY_DELAY / 1000);
+				UTIL_TIMER_Start(&JoinRetryTimer); // 10 sn sonra otomatik rejoin tetikler
+			} else {
+				APP_LOG(TS_OFF, VLEVEL_M,
+						"Rejoin denemeleri tukendi, buton veya sonraki dongu bekleniyor\r\n");
+			}
+		}
+	}
+	/* USER CODE END OnJoinRequest_1 */
 }
 
 static void OnBeaconStatusChange(LmHandlerBeaconParams_t *params)
@@ -612,19 +702,6 @@ static void StopJoin(void)
   /* USER CODE END StopJoin_Last */
 }
 
-static void OnStopJoinTimerEvent(void *context)
-{
-  /* USER CODE BEGIN OnStopJoinTimerEvent_1 */
-
-  /* USER CODE END OnStopJoinTimerEvent_1 */
-  if (ActivationType == LORAWAN_DEFAULT_ACTIVATION_TYPE)
-  {
-    UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaStopJoinEvent), CFG_SEQ_Prio_0);
-  }
-  /* USER CODE BEGIN OnStopJoinTimerEvent_Last */
-
-  /* USER CODE END OnStopJoinTimerEvent_Last */
-}
 
 static void StoreContext(void)
 {

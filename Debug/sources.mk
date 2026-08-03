@@ -39,4 +39,5 @@ Utilities/misc \
 Utilities/sequencer \
 Utilities/timer \
 Utilities/trace/adv_trace \
+external_libs/Wake_Up_Button/Src \
 

@@ -70,7 +70,8 @@ LoRaWAN/App/lora_app.o: ../LoRaWAN/App/lora_app.c ../Core/Inc/platform.h \
  ../Middlewares/Third_Party/LoRaWAN/Mac/Region/RegionVersion.h \
  ../Core/Inc/adc_if.h ../Core/Inc/adc.h ../Core/Inc/platform.h \
  ../LoRaWAN/App/CayenneLpp.h ../Core/Inc/sys_sensors.h \
- ../Core/Inc/flash_if.h
+ ../Core/Inc/flash_if.h ../Core/Inc/subghz.h \
+ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/Wake_Up_Button/Inc/wake_up_button.h
 ../Core/Inc/platform.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/stm32wlxx.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/stm32wle5xx.h:
@@ -154,3 +155,5 @@ LoRaWAN/App/lora_app.o: ../LoRaWAN/App/lora_app.c ../Core/Inc/platform.h \
 ../LoRaWAN/App/CayenneLpp.h:
 ../Core/Inc/sys_sensors.h:
 ../Core/Inc/flash_if.h:
+../Core/Inc/subghz.h:
+C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/Wake_Up_Button/Inc/wake_up_button.h:

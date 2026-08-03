@@ -62,11 +62,7 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(LED1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BUT1_Pin */
-  GPIO_InitStruct.Pin = BUT1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(BUT1_GPIO_Port, &GPIO_InitStruct);
+
 
   /*Configure GPIO pins : RF_CTRL1_Pin RF_CTRL2_Pin */
   GPIO_InitStruct.Pin = RF_CTRL1_Pin|RF_CTRL2_Pin;
@@ -75,9 +71,7 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
 
 }
 
