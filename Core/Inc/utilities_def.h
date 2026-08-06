@@ -43,7 +43,7 @@ extern "C" {
 typedef enum
 {
   /* USER CODE BEGIN CFG_LPM_Id_t_0 */
-
+  CFG_LPM_RFID_Id,
   /* USER CODE END CFG_LPM_Id_t_0 */
   CFG_LPM_APPLI_Id,
   CFG_LPM_UART_TX_Id,
@@ -80,6 +80,9 @@ typedef enum
   CFG_SEQ_Task_LoRaStoreContextEvent,
   /* USER CODE BEGIN CFG_SEQ_Task_Id_t */
   CFG_SEQ_Task_LoRaRejoinEvent,
+  CFG_SEQ_Task_ReadRFIDEvent,
+  CFG_SEQ_Task_SendRFIDEvent,
+  CFG_SEQ_Task_RfidAckTimeoutEvent,
   /* USER CODE END CFG_SEQ_Task_Id_t */
   CFG_SEQ_Task_NBR
 } CFG_SEQ_Task_Id_t;

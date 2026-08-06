@@ -33,7 +33,12 @@ extern "C" {
 
 /* Exported types ------------------------------------------------------------*/
 /* USER CODE BEGIN ET */
-
+typedef enum
+{
+	LSMS_TX_ACK_NONE=11,
+	LSMS_TX_ACK_SUCCES=12,
+	LSMS_TX_ACK_FAIL=13
+}lora_sended_msg_status;
 /* USER CODE END ET */
 
 /* Exported constants --------------------------------------------------------*/
@@ -133,7 +138,11 @@ extern "C" {
 
 /* Exported macros -----------------------------------------------------------*/
 /* USER CODE BEGIN EM */
-
+//type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:ind
+#define LORA_RFID_MSG_TYPE_LIVE_UID 	 0x45
+#define LORA_RFID_MSG_TYPE_STORED_UID 	 0x54
+#define LORA_RFID_MSG_TYPE_STATUS 		 0x27
+#define LORA_RFID_MSG_TYPE_IND			 0x22
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/

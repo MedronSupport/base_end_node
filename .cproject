@@ -63,6 +63,8 @@
 									<listOptionValue builtIn="false" value="../Middlewares/Third_Party/SubGHz_Phy"/>
 									<listOptionValue builtIn="false" value="../Middlewares/Third_Party/SubGHz_Phy/stm32_radio_driver"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/external_libs/Wake_Up_Button/Inc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/external_libs/MFRC522/Inc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/external_libs/persistent_circular_buffer/Inc}&quot;"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.198322800" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -94,7 +96,9 @@
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="LoRaWAN"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Middlewares"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Utilities"/>
-						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="external_libs/Wake_Up_Button/Src"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="external_libs/MFRC522/Src"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="external_libs/Wake_Up_Button/Source"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="external_libs/persistent_circular_buffer/Src"/>
 					</sourceEntries>
 				</configuration>
 			</storageModule>

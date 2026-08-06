@@ -9,7 +9,9 @@ RM := rm -rf
 
 # All of the sources participating in the build are defined here
 -include sources.mk
--include external_libs/Wake_Up_Button/Src/subdir.mk
+-include external_libs/persistent_circular_buffer/Src/subdir.mk
+-include external_libs/Wake_Up_Button/Source/subdir.mk
+-include external_libs/MFRC522/Src/subdir.mk
 -include Utilities/trace/adv_trace/subdir.mk
 -include Utilities/timer/subdir.mk
 -include Utilities/sequencer/subdir.mk

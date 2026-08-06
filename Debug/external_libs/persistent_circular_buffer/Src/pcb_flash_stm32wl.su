@@ -1,0 +1,8 @@
+../external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.c:11:13:pcb_is_aligned_8	16	static
+../external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.c:16:20:pcb_flash_unlock	8	static
+../external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.c:33:20:pcb_flash_lock	8	static
+../external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.c:44:20:pcb_flash_erase_page	32	static
+../external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.c:68:20:pcb_flash_program	48	static
+../external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.c:113:20:pcb_flash_read	24	static
+../external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.c:127:20:pcb_flash_verify	24	static
+../external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.c:145:10:pcb_flash_last_hal_error	4	static

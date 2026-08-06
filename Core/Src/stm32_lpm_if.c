@@ -25,7 +25,7 @@
 #include "usart_if.h"
 
 /* USER CODE BEGIN Includes */
-
+#include "sys_app.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -65,7 +65,7 @@ const struct UTIL_LPM_Driver_s UTIL_PowerDriver =
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
-
+static volatile uint32_t g_stopModeEntryCount = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -78,7 +78,6 @@ const struct UTIL_LPM_Driver_s UTIL_PowerDriver =
 void PWR_EnterOffMode(void)
 {
   /* USER CODE BEGIN EnterOffMode_1 */
-
   /* USER CODE END EnterOffMode_1 */
 }
 
@@ -92,7 +91,7 @@ void PWR_ExitOffMode(void)
 void PWR_EnterStopMode(void)
 {
   /* USER CODE BEGIN EnterStopMode_1 */
-
+	g_stopModeEntryCount++;
   /* USER CODE END EnterStopMode_1 */
   HAL_SuspendTick();
   /* Clear Status Flag before entering STOP/STANDBY Mode */
@@ -122,7 +121,7 @@ void PWR_ExitStopMode(void)
   /* Resume not retained USARTx and DMA */
   vcom_Resume();
   /* USER CODE BEGIN ExitStopMode_2 */
-
+  APP_LOG(TS_OFF, VLEVEL_M, "STOP2'den uyanildi (toplam giris: %lu)\r\n", g_stopModeEntryCount);
   /* USER CODE END ExitStopMode_2 */
 }
 

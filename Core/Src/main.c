@@ -28,6 +28,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "wake_up_button.h"
+#include "MFRC522_STM32.h"
+#include "persistent_circular_buffer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,7 +50,9 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+ pcb_handle_t eventBuffer = PCB_HANDLE_INITIALIZER;
+ pcb_record_t queryBuffer[PCB_CAPACITY];
+ uint16_t lastRecordId = 0U;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -86,12 +90,19 @@ int main(void)
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
-  wake_up_gpio_init();
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  wake_up_gpio_init();
+  MFRC522_Gpio_Init();
 
+  MFRC522_Hardware_Reset_By_GPIO(SPI_RESET_GPIO_Port,SPI_RESET_Pin);
+  MFRC522_Power_Reset_By_GPIO();
+  if (pcb_init(&eventBuffer) != PCB_OK) {
+		Error_Handler();
+	}
   MX_DMA_Init();
   MX_USART1_UART_Init();
   MX_ADC_Init();
@@ -162,7 +173,6 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
 /* USER CODE END 4 */
 
 /**

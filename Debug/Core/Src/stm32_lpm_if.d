@@ -35,6 +35,8 @@ Core/Src/stm32_lpm_if.o: ../Core/Src/stm32_lpm_if.c \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_exti.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_rtc.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_rtc_ex.h \
+ ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_spi.h \
+ ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_spi_ex.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_subghz.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_spi.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart.h \
@@ -46,7 +48,8 @@ Core/Src/stm32_lpm_if.o: ../Core/Src/stm32_lpm_if.c \
  ../Core/Inc/usart_if.h ../Utilities/trace/adv_trace/stm32_adv_trace.h \
  ../Core/Inc/utilities_conf.h ../Drivers/CMSIS/Include/cmsis_compiler.h \
  ../Utilities/misc/stm32_mem.h ../Utilities/misc/stm32_tiny_vsnprintf.h \
- ../Core/Inc/utilities_def.h ../Core/Inc/usart.h ../Core/Inc/dma.h
+ ../Core/Inc/utilities_def.h ../Core/Inc/usart.h ../Core/Inc/dma.h \
+ ../Core/Inc/sys_app.h ../Core/Inc/sys_conf.h
 ../Core/Inc/platform.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/stm32wlxx.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/stm32wle5xx.h:
@@ -83,6 +86,8 @@ Core/Src/stm32_lpm_if.o: ../Core/Src/stm32_lpm_if.c \
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_exti.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_rtc.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_rtc_ex.h:
+../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_spi.h:
+../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_spi_ex.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_subghz.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_spi.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart.h:
@@ -101,3 +106,5 @@ Core/Src/stm32_lpm_if.o: ../Core/Src/stm32_lpm_if.c \
 ../Core/Inc/utilities_def.h:
 ../Core/Inc/usart.h:
 ../Core/Inc/dma.h:
+../Core/Inc/sys_app.h:
+../Core/Inc/sys_conf.h:

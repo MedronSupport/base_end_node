@@ -38,6 +38,9 @@
 /* USER CODE BEGIN Includes */
 #include "subghz.h"
 #include "wake_up_button.h"
+#include "MFRC522_STM32.h"
+#include "stm32_lpm.h"
+#include "persistent_circular_buffer.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -46,7 +49,9 @@
 /**
   * @brief LoRaWAN application version
   */
-
+extern SPI_HandleTypeDef hspi2;
+extern  pcb_handle_t eventBuffer;
+extern  uint16_t lastRecordId;
 /* USER CODE END EV */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -95,6 +100,9 @@ typedef enum TxEventType_e
 /* USER CODE BEGIN PD */
 #define JOIN_RETRY_MAX      3       /* ard arda otomatik deneme say\u0131s\u0131 */
 #define JOIN_RETRY_DELAY    3000   /* otomatik denemeler aras\u0131 bekleme, ms */
+#define RFID_ACK_TIMEOUT_MS 80000  /* ACK icin azami bekleme, ms - takilirsa flag'i zorla temizler */
+#define RFID_LPM_USER_MASK \
+    (1UL << CFG_LPM_RFID_Id)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -165,7 +173,7 @@ static void StopJoin(void);
   * @brief  Join switch timer callback function
   * @param  context ptr of Join switch context
   */
-static void OnStopJoinTimerEvent(void *context);
+
 
 /**
   * @brief  Notifies the upper layer that the NVM context has changed
@@ -223,6 +231,13 @@ static void OnSystemReset(void);
 /* USER CODE BEGIN PFP */
 static void TryJoin(void);
 static void OnJoinRetryTimerEvent(void *context);
+static void ReadRFIDCard(void);
+static void OnRfidReadTimeoutEvent(void *context);
+static void RfidPreventStopMode(void);
+static void RfidAllowStopMode(void);
+static void SendRFID_Data(void);
+static void OnRfidAckTimeoutEvent(void *context);
+static void RfidAckTimeoutHandler(void);
 /* USER CODE END PFP */
 
 /* Private variables ---------------------------------------------------------*/
@@ -284,7 +299,7 @@ static TxEventType_t EventType = TX_ON_TIMER;
 /**
   * @brief Timer to handle the application Tx
   */
-static UTIL_TIMER_Object_t TxTimer;
+//static UTIL_TIMER_Object_t TxTimer;
 
 /**
   * @brief Tx Timer period
@@ -300,7 +315,8 @@ static UTIL_TIMER_Object_t StopJoinTimer;
 /**
   * @brief User application buffer
   */
-
+static UTIL_TIMER_Object_t RfidReadTimeoutTimer;
+static UTIL_TIMER_Time_t RFID_TIMEOUT = MFRC_RFID_READ_TIMEOUT;
 static uint8_t AppDataBuffer[LORAWAN_APP_DATA_BUFFER_MAX_SIZE];
 /**
   * @brief User application data structure
@@ -313,6 +329,18 @@ static uint8_t UplinkCounter = 0;
 
 static UTIL_TIMER_Object_t JoinRetryTimer;
 static uint8_t JoinRetryCount = 0;
+
+static bool stop_read_rfid=false;
+static bool RfidStopLockActive = false;
+volatile uuid_t uuid_val_rfid={{0},false,0};
+volatile lora_sended_msg_status rfid_sendmsg_status=LSMS_TX_ACK_NONE;
+volatile bool rfid_data_pending_on_lora=false;
+
+static uint32_t g_lastSentTimestamp;
+static uint8_t  g_lastSentUid[MAXIMUM_LEN_UUID];
+static uint8_t  g_lastSentUidLen;
+
+static UTIL_TIMER_Object_t RfidAckTimeoutTimer;
 /* USER CODE END PV */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -341,7 +369,12 @@ void LoRaWAN_Init(void)
   /* USER CODE END LoRaWAN_Init_LV */
 
   /* USER CODE BEGIN LoRaWAN_Init_1 */
-
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaRejoinEvent), UTIL_SEQ_RFU, TryJoin);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ReadRFIDEvent), UTIL_SEQ_RFU,ReadRFIDCard);
+  UTIL_TIMER_Create(&RfidReadTimeoutTimer, RFID_TIMEOUT, UTIL_TIMER_ONESHOT, OnRfidReadTimeoutEvent, NULL);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_SendRFIDEvent), UTIL_SEQ_RFU, SendRFID_Data);
+  UTIL_TIMER_Create(&RfidAckTimeoutTimer, RFID_ACK_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnRfidAckTimeoutEvent, NULL);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_RfidAckTimeoutEvent), UTIL_SEQ_RFU, RfidAckTimeoutHandler);
   /* USER CODE END LoRaWAN_Init_1 */
 
  // UTIL_TIMER_Create(&StopJoinTimer, JOIN_TIME, UTIL_TIMER_ONESHOT, OnStopJoinTimerEvent, NULL);
@@ -350,7 +383,6 @@ void LoRaWAN_Init(void)
 
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), UTIL_SEQ_RFU, SendTxData);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaStoreContextEvent), UTIL_SEQ_RFU, StoreContext);
-  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaRejoinEvent), UTIL_SEQ_RFU, TryJoin);
 
   /* Init Info table used by LmHandler*/
   LoraInfo_Init();
@@ -368,8 +400,8 @@ void LoRaWAN_Init(void)
   if (EventType == TX_ON_TIMER)
   {
     /* send every time timer elapses */
-    UTIL_TIMER_Create(&TxTimer, TxPeriodicity, UTIL_TIMER_ONESHOT, OnTxTimerEvent, NULL);
-    UTIL_TIMER_Start(&TxTimer);
+    /*UTIL_TIMER_Create(&TxTimer, TxPeriodicity, UTIL_TIMER_ONESHOT, OnTxTimerEvent, NULL);
+    UTIL_TIMER_Start(&TxTimer);*/
   }
   else
   {
@@ -411,7 +443,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 		lastButtonTick = currentTick;
 		 APP_LOG(TS_OFF, VLEVEL_M, "Butona basildi....\r\n");
 		/* Geçerli buton basma işlemi */
-		UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent),
+		UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ReadRFIDEvent),
 				CFG_SEQ_Prio_0);
 		break;
 	default:
@@ -423,10 +455,242 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 /* Private functions ---------------------------------------------------------*/
 /* USER CODE BEGIN PrFD */
+
+
+static void RfidPreventStopMode(void)
+{
+    if (RfidStopLockActive == false)
+    {
+        UTIL_LPM_SetStopMode(
+            RFID_LPM_USER_MASK,
+			UTIL_LPM_DISABLE);
+
+        RfidStopLockActive = true;
+    }
+}
+
+static void RfidAllowStopMode(void)
+{
+    if (RfidStopLockActive == true)
+    {
+        UTIL_LPM_SetStopMode(
+            RFID_LPM_USER_MASK,
+            UTIL_LPM_ENABLE);
+
+        RfidStopLockActive = false;
+    }
+}
+static void OnRfidReadTimeoutEvent(void *context)
+{
+  //UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), CFG_SEQ_Prio_0);
+	stop_read_rfid=true;
+}
+static void OnRfidAckTimeoutEvent(void *context)
+{
+	UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_RfidAckTimeoutEvent), CFG_SEQ_Prio_0);
+}
+static void RfidAckTimeoutHandler(void)
+{
+	if (rfid_data_pending_on_lora)
+	{
+		APP_LOG(TS_OFF, VLEVEL_M, "###### RFID ACK timeout - OnTxData gelmedi, veri depoya yaziliyor\r\n");
+		pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid,
+				g_lastSentUidLen, PCB_STATUS_FAILED, &lastRecordId);
+		if (bufferResult == PCB_OK) {
+			pcb_sync(&eventBuffer);
+		} else {
+			USER_LOG("Record add error: %d", bufferResult);
+		}
+		rfid_data_pending_on_lora = false;
+	}
+}
+static void SendRFID_Data(void) {
+	APP_LOG(TS_OFF, VLEVEL_M, "###### Send RFID has triggered... \r\n");
+	if (uuid_val_rfid.is_uuid_data_assigned) {
+		//TEST TIMESTAMP
+		  uint32_t timestamp=1785860967;
+		APP_LOG(TS_OFF, VLEVEL_M, "###### New uuid to send \r\n");
+
+		  g_lastSentTimestamp = timestamp;
+		  memcpy(g_lastSentUid, (const void *)uuid_val_rfid.uid, MAXIMUM_LEN_UUID);
+		  g_lastSentUidLen = uuid_val_rfid.uuid_len;
+
+		if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET) {
+			APP_LOG(TS_ON, VLEVEL_L,
+					"Henuz join olunmadi, gonderim yerine rejoin deneniyor\r\n");
+			JoinRetryCount = 0;
+			UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaRejoinEvent),
+					CFG_SEQ_Prio_0);
+
+			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
+			  if (bufferResult == PCB_OK) {
+				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %lu, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
+			  } else {
+				  USER_LOG("Record add error: %d", bufferResult);
+			  }
+			  pcb_sync(&eventBuffer);
+			return;
+		}
+		LmHandlerErrorStatus_t status = LORAMAC_HANDLER_ERROR;
+		  /* 14 byte payload:
+		   *
+		   *   [0]   	uplink counter
+		   *   [1]		type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:ind
+		   *   [2:5] 	timestamp 4 byte big endian
+		   *   [6]   	uid length
+		   *   [7:13]   uid - 7 byte  big endian
+		   */
+
+		  AppData.Port = LORAWAN_USER_APP_PORT;
+		  AppData.Buffer[0] = UplinkCounter++;
+		  AppData.Buffer[1] = LORA_RFID_MSG_TYPE_LIVE_UID;
+		  AppData.Buffer[2] = (uint8_t)(((uint32_t)timestamp>>24)& 0xFF);
+		  AppData.Buffer[3] = (uint8_t)(((uint32_t)timestamp>>16)& 0xFF);
+		  AppData.Buffer[4] = (uint8_t)(((uint32_t)timestamp>>8)& 0xFF);
+		  AppData.Buffer[5] = (uint8_t)(((uint32_t)timestamp)& 0xFF);
+
+		  AppData.Buffer[6] = uuid_val_rfid.uuid_len;
+
+		  for(int i=0;i<MAXIMUM_LEN_UUID;i++)
+		  {
+			  if(i<uuid_val_rfid.uuid_len)
+			  {
+				  AppData.Buffer[7+i] = uuid_val_rfid.uid[i];
+			  }else{
+				  AppData.Buffer[7+i] = 0;
+			  }
+		  }
+		  AppData.BufferSize = 14;
+		  UTIL_TIMER_Time_t nextTxIn = 0;
+
+
+
+		  status = LmHandlerSend(&AppData, LmHandlerParams.IsTxConfirmed, false);
+		  if (LORAMAC_HANDLER_SUCCESS == status)
+		  {
+		    APP_LOG(TS_ON, VLEVEL_L, "SEND REQUEST (port %d, %d bytes)\r\n",
+		            AppData.Port, AppData.BufferSize);
+
+		    rfid_data_pending_on_lora = true;
+		    UTIL_TIMER_Start(&RfidAckTimeoutTimer);
+		   // HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+		  }
+		  else if (LORAMAC_HANDLER_DUTYCYCLE_RESTRICTED == status)
+		  {
+		    nextTxIn = LmHandlerGetDutyCycleWaitTime();
+		    if (nextTxIn > 0)
+		    {
+		      APP_LOG(TS_ON, VLEVEL_M, "Next Tx in  : ~%d second(s)\r\n", (nextTxIn / 1000));
+		    }
+		    rfid_data_pending_on_lora = false;
+			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
+			  if (bufferResult == PCB_OK) {
+				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %lu, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
+			  } else {
+				  USER_LOG("Record add error: %d", bufferResult);
+			  }
+			  pcb_sync(&eventBuffer);
+			  rfid_data_pending_on_lora=false;
+		  }
+		  else
+		  {
+			  APP_LOG(TS_ON, VLEVEL_M, "SEND FAILED (%d)\r\n", (int)status);
+
+			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
+			  if (bufferResult == PCB_OK) {
+				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %lu, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
+			  } else {
+				  USER_LOG("Record add error: %d", bufferResult);
+			  }
+			  pcb_sync(&eventBuffer);
+			  rfid_data_pending_on_lora=false;
+		  }
+
+	}else{
+		if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET) {
+			APP_LOG(TS_ON, VLEVEL_M,
+					"Henuz join olunmadi, gonderim yerine rejoin deneniyor\r\n");
+			JoinRetryCount = 0;
+			UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaRejoinEvent),
+					CFG_SEQ_Prio_0);
+			return;
+		}
+	}
+}
+static void ReadRFIDCard(void) {
+	if (rfid_data_pending_on_lora) {
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Onceki RFID gonderimi hala ACK bekliyor, yeni okuma reddedildi\r\n");
+		return;
+	}
+	APP_LOG(TS_OFF, VLEVEL_M, "###### Read RFID has triggered... \r\n");
+	//uint8_t uid[7];
+	uuid_val_rfid.is_uuid_data_assigned=false;
+	memset(uuid_val_rfid.uid,0,MAXIMUM_LEN_UUID);
+	MFRC522_t rfID = { &hspi2, CS_GPIO_Port, CS_Pin, SPI_RESET_GPIO_Port,
+			SPI_RESET_Pin };
+	RfidPreventStopMode();
+	MFRC522_Power_On_By_GPIO();
+	HAL_Delay(5);
+	stop_read_rfid = false;
+	rfid_read_process_init(&rfID);
+	APP_LOG(TS_OFF, VLEVEL_M, "rfid_read_process_init \r\n");
+	UTIL_TIMER_Start(&RfidReadTimeoutTimer);
+	APP_LOG(TS_OFF, VLEVEL_M, "RfidReadTimeoutTimer \r\n");
+	while (!stop_read_rfid) {
+		APP_LOG(TS_OFF, VLEVEL_M, "loop \r\n");
+		uint8_t len = 0;
+		if (waitcardDetectUntilTimeout(&rfID, MFRC_RFID_WAIT_DETECT_TIMEOUT) == STATUS_OK) {
+			APP_LOG(TS_OFF, VLEVEL_M, "###### Card Detected... \r\n");
+			if (MFRC522_ReadUid(&rfID, uuid_val_rfid.uid, &len) == STATUS_OK) {
+				USER_LOG("len %d", len);
+				uuid_val_rfid.uuid_len=len;
+				if (len == 7) {
+				APP_LOG(TS_OFF, VLEVEL_M, "CARD ID:%02X %02X %02X %02X %02X %02X %02X\r\n",
+						uuid_val_rfid.uid[0], uuid_val_rfid.uid[1], uuid_val_rfid.uid[2], uuid_val_rfid.uid[3], uuid_val_rfid.uid[4], uuid_val_rfid.uid[5],uuid_val_rfid.uid[6]);
+				} else if (len == 4) {
+
+					APP_LOG(TS_OFF, VLEVEL_M, "CARD ID:%02X %02X %02X %02X\r\n", uuid_val_rfid.uid[0], uuid_val_rfid.uid[1],
+							uuid_val_rfid.uid[2], uuid_val_rfid.uid[3]);
+				}
+				uuid_val_rfid.is_uuid_data_assigned=true;
+				break;
+			}
+			/*if ((len == 4U) || (len == 7U)) {
+				uint32_t timestamp = GetUnixTimestamp();
+
+				pcb_result_t bufferResult = pcb_add(&eventBuffer, timestamp,
+						uid, len, PCB_STATUS_FAILED, &lastRecordId);
+
+				if (bufferResult == PCB_OK) {
+					USER_LOG(
+							"Record added to RAM. ID: %u, Time: %lu, Count: %u",
+							lastRecordId, timestamp,
+							(unsigned int )pcb_count(&eventBuffer));
+				} else {
+					USER_LOG("Record add error: %d", bufferResult);
+				}
+			} else {
+				USER_LOG("Unsupported UID length: %u", len);
+			}*/
+		}
+		waitcardRemovalUntilTimeout(&rfID,MFRC_RFID_WAIT_REMOVE_TIMEOUT);
+		//pcb_sync(&eventBuffer);
+		//HAL_Delay(1000);
+	}
+	UTIL_TIMER_Stop(&RfidReadTimeoutTimer);
+	MFRC522_Hardware_Reset(&rfID);
+	MFRC522_Spi_Deinit();
+	HAL_Delay(5);
+	MFRC522_Power_Reset_By_GPIO();
+	UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_SendRFIDEvent),
+			CFG_SEQ_Prio_0);
+	RfidAllowStopMode();
+	APP_LOG(TS_OFF, VLEVEL_M, "RFID Read task has ending...\r\n");
+}
 static void TryJoin(void)
 {
   APP_LOG(TS_OFF, VLEVEL_M, "###### TryJoin() tetiklendi - zorla rejoin\r\n");
-  UTIL_TIMER_Stop(&TxTimer);
+ // UTIL_TIMER_Stop(&TxTimer);
 
   if (LORAMAC_HANDLER_SUCCESS != LmHandlerStop())
   {
@@ -436,7 +700,7 @@ static void TryJoin(void)
   LmHandlerConfigure(&LmHandlerParams);
   LmHandlerJoin(ActivationType, true);   /* ActivationType hi\u00e7 de\u011fi\u015ftirilmiyor, sadece yeniden join */
 
-  UTIL_TIMER_Start(&TxTimer);
+ // UTIL_TIMER_Start(&TxTimer);
 }
 
 static void OnJoinRetryTimerEvent(void *context)
@@ -457,8 +721,7 @@ static void OnRxData(LmHandlerAppData_t *appData, LmHandlerRxParams_t *params)
 	    if ((appData->Port == LORAWAN_USER_APP_PORT) &&
 	        (appData->BufferSize == 1) && (appData->Buffer != NULL))
 	    {
-	      HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin,
-	                        (appData->Buffer[0] & 0x01) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+
 	    }
 	  }
   /* USER CODE END OnRxData_1 */
@@ -491,7 +754,7 @@ static void SendTxData(void)
 		  AppData.Buffer[2] = (uint8_t)(voltage & 0xFF);
 		  AppData.Buffer[3] = (uint8_t)(((uint16_t)temperature >> 8) & 0xFF);
 		  AppData.Buffer[4] = (uint8_t)((uint16_t)temperature & 0xFF);
-		  AppData.Buffer[5] = (uint8_t)HAL_GPIO_ReadPin(LED1_GPIO_Port, LED1_Pin);
+		  AppData.Buffer[5] = (uint8_t)1;
 		  AppData.BufferSize = 6;
 
 		  status = LmHandlerSend(&AppData, LmHandlerParams.IsTxConfirmed, false);
@@ -499,7 +762,7 @@ static void SendTxData(void)
 		  {
 		    APP_LOG(TS_ON, VLEVEL_L, "SEND REQUEST (port %d, %d bytes)\r\n",
 		            AppData.Port, AppData.BufferSize);
-		    HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+
 		  }
 		  else if (LORAMAC_HANDLER_DUTYCYCLE_RESTRICTED == status)
 		  {
@@ -512,6 +775,7 @@ static void SendTxData(void)
 		  else
 		  {
 		    APP_LOG(TS_ON, VLEVEL_L, "SEND FAILED (%d)\r\n", (int)status);
+
 		  }
   /* USER CODE END SendTxData_1 */
 }
@@ -521,10 +785,10 @@ static void OnTxTimerEvent(void *context)
   /* USER CODE BEGIN OnTxTimerEvent_1 */
 
   /* USER CODE END OnTxTimerEvent_1 */
-  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), CFG_SEQ_Prio_0);
+ // UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), CFG_SEQ_Prio_0);
 
   /*Wait for next tx slot*/
-  UTIL_TIMER_Start(&TxTimer);
+  //UTIL_TIMER_Start(&TxTimer);
   /* USER CODE BEGIN OnTxTimerEvent_2 */
 
   /* USER CODE END OnTxTimerEvent_2 */
@@ -536,20 +800,39 @@ static void OnTxTimerEvent(void *context)
 
 static void OnTxData(LmHandlerTxParams_t *params)
 {
-  if ((params != NULL) && (params->MsgType == LORAMAC_HANDLER_CONFIRMED_MSG))
-  {
-    if (params->AckReceived == 0)
-    {
-      APP_LOG(TS_OFF, VLEVEL_M, "###### CONFIRMED TX BASARISIZ - ACK ALINAMADI (uplink #%d, status=%d)\r\n",
-              (int)params->UplinkCounter, (int)params->Status);
-      /* buraya: RFID kuyruğundan silme, retry sayaci, vs. */
-    }
-    else
-    {
-      APP_LOG(TS_OFF, VLEVEL_M, "CONFIRMED TX: ACK alindi (uplink #%d)\r\n",
-              (int)params->UplinkCounter);
-    }
-  }
+	if ((params != NULL) && (params->MsgType == LORAMAC_HANDLER_CONFIRMED_MSG))
+	{
+		if (params->AckReceived == 0)
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "###### CONFIRMED TX BASARISIZ - ACK ALINAMADI (uplink #%d, status=%d)\r\n",
+					(int)params->UplinkCounter, (int)params->Status);
+
+			if(rfid_data_pending_on_lora)
+			{
+				UTIL_TIMER_Stop(&RfidAckTimeoutTimer);
+				APP_LOG(TS_OFF, VLEVEL_M, "###### RFID ACK ALINAMADI, depoya yaziliyor\r\n");
+
+				pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
+				if (bufferResult == PCB_OK) {
+					APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %lu, Count: %u",lastRecordId, g_lastSentTimestamp,(unsigned int )pcb_count(&eventBuffer));
+				} else {
+					USER_LOG("Record add error: %d", bufferResult);
+				}
+				pcb_sync(&eventBuffer);
+				rfid_data_pending_on_lora=false;
+			}
+		}
+		else
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "CONFIRMED TX: ACK alindi (uplink #%d)\r\n",
+					(int)params->UplinkCounter);
+
+			if (rfid_data_pending_on_lora) {
+				UTIL_TIMER_Stop(&RfidAckTimeoutTimer);
+			}
+			rfid_data_pending_on_lora=false;
+		}
+	}
 }
 
 static void OnJoinRequest(LmHandlerJoinParams_t *joinParams) {
@@ -559,7 +842,7 @@ static void OnJoinRequest(LmHandlerJoinParams_t *joinParams) {
 			JoinRetryCount = 0;
 			APP_LOG(TS_OFF, VLEVEL_M, "\r\n###### = JOINED = %s ======\r\n",
 					(joinParams->Mode == ACTIVATION_TYPE_ABP) ? "ABP " : "OTAA");
-			HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET);
+
 		} else {
 			APP_LOG(TS_OFF, VLEVEL_M, "\r\n###### = JOIN FAILED\r\n");
 			if (JoinRetryCount < JOIN_RETRY_MAX) // <-- buradan itibaren yeni eklenen kısım
@@ -623,9 +906,9 @@ static void OnTxPeriodicityChanged(uint32_t periodicity)
   }
 
   /* Update timer periodicity */
-  UTIL_TIMER_Stop(&TxTimer);
-  UTIL_TIMER_SetPeriod(&TxTimer, TxPeriodicity);
-  UTIL_TIMER_Start(&TxTimer);
+  //UTIL_TIMER_Stop(&TxTimer);
+  //UTIL_TIMER_SetPeriod(&TxTimer, TxPeriodicity);
+  //UTIL_TIMER_Start(&TxTimer);
   /* USER CODE BEGIN OnTxPeriodicityChanged_2 */
 
   /* USER CODE END OnTxPeriodicityChanged_2 */
@@ -673,7 +956,7 @@ static void StopJoin(void)
 
   /* USER CODE END StopJoin_1 */
 
-  UTIL_TIMER_Stop(&TxTimer);
+  //UTIL_TIMER_Stop(&TxTimer);
 
   if (LORAMAC_HANDLER_SUCCESS != LmHandlerStop())
   {
@@ -694,7 +977,7 @@ static void StopJoin(void)
     }
     LmHandlerConfigure(&LmHandlerParams);
     LmHandlerJoin(ActivationType, true);
-    UTIL_TIMER_Start(&TxTimer);
+   // UTIL_TIMER_Start(&TxTimer);
   }
   UTIL_TIMER_Start(&StopJoinTimer);
   /* USER CODE BEGIN StopJoin_Last */

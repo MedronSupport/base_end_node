@@ -1,0 +1,26 @@
+/*
+ * In the STM32CubeIDE-generated linker script, change only the FLASH length:
+ *
+ * Original:
+ *   FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 256K
+ *
+ * Required for this library:
+ *   FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 252K
+ *
+ * The final 4 KiB then remains outside all normal application sections:
+ *   0x0803F000 - 0x0803FFFF
+ *
+ * Optional documentation region/symbols can be added if desired:
+ */
+
+/*
+PCB_NVM (r) : ORIGIN = 0x0803F000, LENGTH = 4K
+
+__pcb_nvm_start__ = ORIGIN(PCB_NVM);
+__pcb_nvm_end__   = ORIGIN(PCB_NVM) + LENGTH(PCB_NVM);
+*/
+
+/*
+ * Do not place an initialized C object or linker output section in PCB_NVM.
+ * The region is written only at runtime through the STM32 HAL Flash API.
+ */
