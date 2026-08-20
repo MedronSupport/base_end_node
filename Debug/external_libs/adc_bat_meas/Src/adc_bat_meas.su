@@ -1,0 +1,11 @@
+../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_bus.h:449:22:LL_AHB2_GRP1_EnableClock	24	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:16:6:adc_bat_meas_init	8	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:43:6:BatteryDivider_Init	32	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:58:6:BatteryDivider_DeInit	8	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:62:6:BatteryDivider_Enable	8	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:68:6:BatteryDivider_Disable	8	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:75:6:ADC_Select_CH3	24	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:89:6:ADC_Select_VREF	24	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:103:6:ADC_Select_TEMP	24	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:118:10:readVREFINT_CAL	4	static
+../external_libs/adc_bat_meas/Src/adc_bat_meas.c:123:10:adc_conv_get_battery_volatge	80	static

@@ -92,5 +92,6 @@
 "./Utilities/trace/adv_trace/stm32_adv_trace.o"
 "./external_libs/MFRC522/Src/MFRC522_STM32.o"
 "./external_libs/Wake_Up_Button/Source/wake_up_button.o"
+"./external_libs/adc_bat_meas/Src/adc_bat_meas.o"
 "./external_libs/persistent_circular_buffer/Src/pcb_flash_stm32wl.o"
 "./external_libs/persistent_circular_buffer/Src/persistent_circular_buffer.o"

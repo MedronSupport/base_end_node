@@ -77,7 +77,8 @@ LoRaWAN/App/lora_app.o: ../LoRaWAN/App/lora_app.c ../Core/Inc/platform.h \
  C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/MFRC522/Inc/MFRC522_STM32.h \
  ../Core/Inc/main.h ../Utilities/lpm/tiny_lpm/stm32_lpm.h \
  C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/persistent_circular_buffer/Inc/persistent_circular_buffer.h \
- C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/persistent_circular_buffer/Inc/pcb_config.h
+ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/persistent_circular_buffer/Inc/pcb_config.h \
+ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/adc_bat_meas/Inc/adc_bat_meas.h
 ../Core/Inc/platform.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/stm32wlxx.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/stm32wle5xx.h:
@@ -170,3 +171,4 @@ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/MFRC522/Inc/MFRC522_S
 ../Utilities/lpm/tiny_lpm/stm32_lpm.h:
 C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/persistent_circular_buffer/Inc/persistent_circular_buffer.h:
 C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/persistent_circular_buffer/Inc/pcb_config.h:
+C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/adc_bat_meas/Inc/adc_bat_meas.h:

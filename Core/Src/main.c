@@ -30,6 +30,8 @@
 #include "wake_up_button.h"
 #include "MFRC522_STM32.h"
 #include "persistent_circular_buffer.h"
+
+#include "../../external_libs/adc_bat_meas/Inc/adc_bat_meas.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -105,7 +107,6 @@ int main(void)
 	}
   MX_DMA_Init();
   MX_USART1_UART_Init();
-  MX_ADC_Init();
   MX_RTC_Init();
   MX_LoRaWAN_Init();
   /* USER CODE BEGIN 2 */

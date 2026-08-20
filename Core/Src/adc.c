@@ -69,22 +69,33 @@ void MX_ADC_Init(void)
 
 }
 
-void HAL_ADC_MspInit(ADC_HandleTypeDef* adcHandle)
+void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
 {
-
-  if(adcHandle->Instance==ADC)
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  if(hadc->Instance==ADC)
   {
-  /* USER CODE BEGIN ADC_MspInit 0 */
+    /* USER CODE BEGIN ADC_MspInit 0 */
 
-  /* USER CODE END ADC_MspInit 0 */
-    /* ADC clock enable */
+    /* USER CODE END ADC_MspInit 0 */
+    /* Peripheral clock enable */
     __HAL_RCC_ADC_CLK_ENABLE();
-  /* USER CODE BEGIN ADC_MspInit 1 */
 
-  /* USER CODE END ADC_MspInit 1 */
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    /**ADC GPIO Configuration
+    PB4     ------> ADC_IN3
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_4;
+    GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    /* USER CODE BEGIN ADC_MspInit 1 */
+
+    /* USER CODE END ADC_MspInit 1 */
+
   }
-}
 
+}
 void HAL_ADC_MspDeInit(ADC_HandleTypeDef* adcHandle)
 {
 

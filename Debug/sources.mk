@@ -41,5 +41,6 @@ Utilities/timer \
 Utilities/trace/adv_trace \
 external_libs/MFRC522/Src \
 external_libs/Wake_Up_Button/Source \
+external_libs/adc_bat_meas/Src \
 external_libs/persistent_circular_buffer/Src \
 

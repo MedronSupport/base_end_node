@@ -44,6 +44,7 @@ typedef enum
 {
   /* USER CODE BEGIN CFG_LPM_Id_t_0 */
   CFG_LPM_RFID_Id,
+  CFG_LPM_STATUS_Id,
   /* USER CODE END CFG_LPM_Id_t_0 */
   CFG_LPM_APPLI_Id,
   CFG_LPM_UART_TX_Id,
@@ -64,7 +65,7 @@ typedef enum
 {
   CFG_SEQ_Prio_0,
   /* USER CODE BEGIN CFG_SEQ_Prio_Id_t */
-
+  CFG_SEQ_Prio_status_1,
   /* USER CODE END CFG_SEQ_Prio_Id_t */
   CFG_SEQ_Prio_NBR,
 } CFG_SEQ_Prio_Id_t;
@@ -83,6 +84,7 @@ typedef enum
   CFG_SEQ_Task_ReadRFIDEvent,
   CFG_SEQ_Task_SendRFIDEvent,
   CFG_SEQ_Task_RfidAckTimeoutEvent,
+  CFG_SEQ_Task_StatusMSGEvent,
   /* USER CODE END CFG_SEQ_Task_Id_t */
   CFG_SEQ_Task_NBR
 } CFG_SEQ_Task_Id_t;

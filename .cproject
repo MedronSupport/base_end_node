@@ -65,6 +65,7 @@
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/external_libs/Wake_Up_Button/Inc}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/external_libs/MFRC522/Inc}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/external_libs/persistent_circular_buffer/Inc}&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${workspace_loc:/${ProjName}/external_libs/adc_bat_meas/Inc}&quot;"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.198322800" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -98,6 +99,7 @@
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Utilities"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="external_libs/MFRC522/Src"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="external_libs/Wake_Up_Button/Source"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="external_libs/adc_bat_meas/Src"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="sourcePath" name="external_libs/persistent_circular_buffer/Src"/>
 					</sourceEntries>
 				</configuration>
@@ -213,5 +215,12 @@
 			<autodiscovery enabled="false" problemReportingEnabled="true" selectedProfileId=""/>
 		</scannerConfigBuildInfo>
 	</storageModule>
-	<storageModule moduleId="refreshScope"/>
+	<storageModule moduleId="refreshScope" versionNumber="2">
+		<configuration configurationName="Debug">
+			<resource resourceType="PROJECT" workspacePath="/base_end_node"/>
+		</configuration>
+		<configuration configurationName="Release">
+			<resource resourceType="PROJECT" workspacePath="/base_end_node"/>
+		</configuration>
+	</storageModule>
 </cproject>

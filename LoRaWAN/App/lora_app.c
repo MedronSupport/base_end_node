@@ -41,6 +41,7 @@
 #include "MFRC522_STM32.h"
 #include "stm32_lpm.h"
 #include "persistent_circular_buffer.h"
+#include "adc_bat_meas.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -103,6 +104,8 @@ typedef enum TxEventType_e
 #define RFID_ACK_TIMEOUT_MS 80000  /* ACK icin azami bekleme, ms - takilirsa flag'i zorla temizler */
 #define RFID_LPM_USER_MASK \
     (1UL << CFG_LPM_RFID_Id)
+#define STATUS_LPM_USER_MASK \
+    (1UL << CFG_LPM_STATUS_Id)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -238,6 +241,10 @@ static void RfidAllowStopMode(void);
 static void SendRFID_Data(void);
 static void OnRfidAckTimeoutEvent(void *context);
 static void RfidAckTimeoutHandler(void);
+static void OnStatusMsgTimeoutEvent(void *context);
+static void StatusMsgPreventStopMode(void);
+static void  StatusMsgAllowStopMode(void);
+static void OnStatusMessageHandler(void);
 /* USER CODE END PFP */
 
 /* Private variables ---------------------------------------------------------*/
@@ -316,7 +323,9 @@ static UTIL_TIMER_Object_t StopJoinTimer;
   * @brief User application buffer
   */
 static UTIL_TIMER_Object_t RfidReadTimeoutTimer;
+static UTIL_TIMER_Object_t StatusMessageTimeoutTimer;
 static UTIL_TIMER_Time_t RFID_TIMEOUT = MFRC_RFID_READ_TIMEOUT;
+static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 3600000; /* 1 saat - guc raporundaki "Kritik Bulgu" onerisi (bkz. v2.docx) */
 static uint8_t AppDataBuffer[LORAWAN_APP_DATA_BUFFER_MAX_SIZE];
 /**
   * @brief User application data structure
@@ -335,6 +344,7 @@ static bool RfidStopLockActive = false;
 volatile uuid_t uuid_val_rfid={{0},false,0};
 volatile lora_sended_msg_status rfid_sendmsg_status=LSMS_TX_ACK_NONE;
 volatile bool rfid_data_pending_on_lora=false;
+volatile bool status_data_pending_on_lora=false;
 
 static uint32_t g_lastSentTimestamp;
 static uint8_t  g_lastSentUid[MAXIMUM_LEN_UUID];
@@ -375,6 +385,10 @@ void LoRaWAN_Init(void)
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_SendRFIDEvent), UTIL_SEQ_RFU, SendRFID_Data);
   UTIL_TIMER_Create(&RfidAckTimeoutTimer, RFID_ACK_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnRfidAckTimeoutEvent, NULL);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_RfidAckTimeoutEvent), UTIL_SEQ_RFU, RfidAckTimeoutHandler);
+  //status message timer
+  UTIL_TIMER_Create(&StatusMessageTimeoutTimer, STATUS_MSG_TIMEOUT, UTIL_TIMER_PERIODIC, OnStatusMsgTimeoutEvent, NULL);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_StatusMSGEvent), UTIL_SEQ_RFU, OnStatusMessageHandler);
+
   /* USER CODE END LoRaWAN_Init_1 */
 
  // UTIL_TIMER_Create(&StopJoinTimer, JOIN_TIME, UTIL_TIMER_ONESHOT, OnStopJoinTimerEvent, NULL);
@@ -411,7 +425,7 @@ void LoRaWAN_Init(void)
   }
 
   /* USER CODE BEGIN LoRaWAN_Init_Last */
-
+  UTIL_TIMER_Start(&StatusMessageTimeoutTimer);
   /* USER CODE END LoRaWAN_Init_Last */
 }
 
@@ -455,7 +469,88 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 /* Private functions ---------------------------------------------------------*/
 /* USER CODE BEGIN PrFD */
+static void StatusMsgPreventStopMode(void)
+{
+    if (RfidStopLockActive == false)
+    {
+        UTIL_LPM_SetStopMode(
+        		STATUS_LPM_USER_MASK,
+			UTIL_LPM_DISABLE);
 
+        RfidStopLockActive = true;
+    }
+}
+
+static void  StatusMsgAllowStopMode(void)
+{
+    if (RfidStopLockActive == true)
+    {
+        UTIL_LPM_SetStopMode(
+        		STATUS_LPM_USER_MASK,
+            UTIL_LPM_ENABLE);
+
+        RfidStopLockActive = false;
+    }
+}
+static void OnStatusMessageHandler(void)
+{
+	  StatusMsgPreventStopMode();
+	  int16_t bat_temp_q8_8 = 0;
+	  uint16_t bat_adc_val = adc_conv_get_battery_volatge(&bat_temp_q8_8);
+	  APP_LOG(TS_OFF, VLEVEL_M,"Battery ADC Value:%d mV, Temp:%d.%02d C\r\n",
+	          bat_adc_val, bat_temp_q8_8 >> 8, (int)((bat_temp_q8_8 & 0xFF) * 100 / 256));
+	  StatusMsgAllowStopMode();
+
+	  if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET)
+	  {
+		  APP_LOG(TS_OFF, VLEVEL_M, "###### Status mesaji icin join yok, gonderim atlandi\r\n");
+
+		  return;
+	  }
+
+	  if (rfid_data_pending_on_lora)
+	  {
+		  /* Ayni AppData buffer'ini ve tek seferde bir confirmed uplink kuralini
+		   * paylasiyoruz - RFID gonderimi hala ACK bekliyorsa bu status turunu atla,
+		   * 15 sn sonra zaten yeniden denenecek. */
+		  APP_LOG(TS_OFF, VLEVEL_M, "###### RFID gonderimi ACK bekliyor, status gonderimi atlandi\r\n");
+
+		  return;
+	  }
+
+	  /* 6 byte payload:
+	   *   [0]   uplink counter
+	   *   [1]   type = 0x27 (LORA_RFID_MSG_TYPE_STATUS)
+	   *   [2:3] batarya gerilimi mV, big endian
+	   *   [4:5] sicaklik Q8.8 (deger/256.0 = derece C), big endian
+	   */
+	  AppData.Port = LORAWAN_USER_APP_PORT;
+	  AppData.Buffer[0] = UplinkCounter++;
+	  AppData.Buffer[1] = LORA_RFID_MSG_TYPE_STATUS;
+	  AppData.Buffer[2] = (uint8_t)((bat_adc_val >> 8) & 0xFF);
+	  AppData.Buffer[3] = (uint8_t)(bat_adc_val & 0xFF);
+	  AppData.Buffer[4] = (uint8_t)(((uint16_t)bat_temp_q8_8 >> 8) & 0xFF);
+	  AppData.Buffer[5] = (uint8_t)((uint16_t)bat_temp_q8_8 & 0xFF);
+	  AppData.BufferSize = 6;
+
+	  status_data_pending_on_lora = true;
+	  LmHandlerErrorStatus_t sendStatus = LmHandlerSend(&AppData, LORAMAC_HANDLER_CONFIRMED_MSG, false);
+	  if (LORAMAC_HANDLER_SUCCESS == sendStatus)
+	  {
+		  APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS SEND REQUEST (bat=%d mV) - ACK bekleniyor\r\n", bat_adc_val);
+	  }
+	  else
+	  {
+		  status_data_pending_on_lora = false;
+		  APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS SEND FAILED (%d)\r\n", (int)sendStatus);
+	  }
+
+
+}
+static void OnStatusMsgTimeoutEvent(void *context)
+{
+	UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_StatusMSGEvent), CFG_SEQ_Prio_status_1);
+}
 
 static void RfidPreventStopMode(void)
 {
@@ -622,6 +717,7 @@ static void ReadRFIDCard(void) {
 		APP_LOG(TS_OFF, VLEVEL_M, "###### Onceki RFID gonderimi hala ACK bekliyor, yeni okuma reddedildi\r\n");
 		return;
 	}
+	awake_led_gpio_init();
 	APP_LOG(TS_OFF, VLEVEL_M, "###### Read RFID has triggered... \r\n");
 	//uint8_t uid[7];
 	uuid_val_rfid.is_uuid_data_assigned=false;
@@ -629,6 +725,7 @@ static void ReadRFIDCard(void) {
 	MFRC522_t rfID = { &hspi2, CS_GPIO_Port, CS_Pin, SPI_RESET_GPIO_Port,
 			SPI_RESET_Pin };
 	RfidPreventStopMode();
+	BuzzerNotify_init();
 	MFRC522_Power_On_By_GPIO();
 	HAL_Delay(5);
 	stop_read_rfid = false;
@@ -636,6 +733,12 @@ static void ReadRFIDCard(void) {
 	APP_LOG(TS_OFF, VLEVEL_M, "rfid_read_process_init \r\n");
 	UTIL_TIMER_Start(&RfidReadTimeoutTimer);
 	APP_LOG(TS_OFF, VLEVEL_M, "RfidReadTimeoutTimer \r\n");
+	for(int i=0;i<5;i++)
+	{
+		awake_led_gpio_toggle();
+		HAL_Delay(100);
+	}
+
 	while (!stop_read_rfid) {
 		APP_LOG(TS_OFF, VLEVEL_M, "loop \r\n");
 		uint8_t len = 0;
@@ -652,31 +755,17 @@ static void ReadRFIDCard(void) {
 					APP_LOG(TS_OFF, VLEVEL_M, "CARD ID:%02X %02X %02X %02X\r\n", uuid_val_rfid.uid[0], uuid_val_rfid.uid[1],
 							uuid_val_rfid.uid[2], uuid_val_rfid.uid[3]);
 				}
+				Buzzer_Alert_Process(1500);
 				uuid_val_rfid.is_uuid_data_assigned=true;
 				break;
 			}
-			/*if ((len == 4U) || (len == 7U)) {
-				uint32_t timestamp = GetUnixTimestamp();
 
-				pcb_result_t bufferResult = pcb_add(&eventBuffer, timestamp,
-						uid, len, PCB_STATUS_FAILED, &lastRecordId);
-
-				if (bufferResult == PCB_OK) {
-					USER_LOG(
-							"Record added to RAM. ID: %u, Time: %lu, Count: %u",
-							lastRecordId, timestamp,
-							(unsigned int )pcb_count(&eventBuffer));
-				} else {
-					USER_LOG("Record add error: %d", bufferResult);
-				}
-			} else {
-				USER_LOG("Unsupported UID length: %u", len);
-			}*/
 		}
+		awake_led_gpio_toggle();
 		waitcardRemovalUntilTimeout(&rfID,MFRC_RFID_WAIT_REMOVE_TIMEOUT);
-		//pcb_sync(&eventBuffer);
-		//HAL_Delay(1000);
 	}
+	awake_led_gpio_deinit();
+	BuzzerNotify_deinit();
 	UTIL_TIMER_Stop(&RfidReadTimeoutTimer);
 	MFRC522_Hardware_Reset(&rfID);
 	MFRC522_Spi_Deinit();
@@ -807,6 +896,13 @@ static void OnTxData(LmHandlerTxParams_t *params)
 			APP_LOG(TS_OFF, VLEVEL_M, "###### CONFIRMED TX BASARISIZ - ACK ALINAMADI (uplink #%d, status=%d)\r\n",
 					(int)params->UplinkCounter, (int)params->Status);
 
+			if (status_data_pending_on_lora)
+			{
+				APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS (batarya) ACK ALINAMADI (uplink #%d)\r\n",
+						(int)params->UplinkCounter);
+				status_data_pending_on_lora = false;
+			}
+
 			if(rfid_data_pending_on_lora)
 			{
 				UTIL_TIMER_Stop(&RfidAckTimeoutTimer);
@@ -826,6 +922,13 @@ static void OnTxData(LmHandlerTxParams_t *params)
 		{
 			APP_LOG(TS_OFF, VLEVEL_M, "CONFIRMED TX: ACK alindi (uplink #%d)\r\n",
 					(int)params->UplinkCounter);
+
+			if (status_data_pending_on_lora)
+			{
+				APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS (batarya) ACK ALINDI (uplink #%d)\r\n",
+						(int)params->UplinkCounter);
+				status_data_pending_on_lora = false;
+			}
 
 			if (rfid_data_pending_on_lora) {
 				UTIL_TIMER_Stop(&RfidAckTimeoutTimer);

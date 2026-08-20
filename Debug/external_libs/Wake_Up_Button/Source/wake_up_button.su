@@ -1,2 +1,8 @@
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_bus.h:449:22:LL_AHB2_GRP1_EnableClock	24	static
 ../external_libs/Wake_Up_Button/Source/wake_up_button.c:8:6:wake_up_gpio_init	32	static
+../external_libs/Wake_Up_Button/Source/wake_up_button.c:21:6:awake_led_gpio_init	32	static
+../external_libs/Wake_Up_Button/Source/wake_up_button.c:37:6:awake_led_gpio_deinit	8	static
+../external_libs/Wake_Up_Button/Source/wake_up_button.c:42:6:awake_led_gpio_toggle	8	static
+../external_libs/Wake_Up_Button/Source/wake_up_button.c:46:6:BuzzerNotify_init	32	static
+../external_libs/Wake_Up_Button/Source/wake_up_button.c:62:6:BuzzerNotify_deinit	8	static
+../external_libs/Wake_Up_Button/Source/wake_up_button.c:68:6:Buzzer_Alert_Process	16	static
