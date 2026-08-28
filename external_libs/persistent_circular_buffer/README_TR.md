@@ -67,6 +67,7 @@ Sync sırası:
 
 - `pcb_add()`
 - `pcb_get_latest()`
+- `pcb_get_latest_by_status()`
 - `pcb_get_last_n()`
 - `pcb_get_recent_slice()`
 - `pcb_get_by_timestamp()`

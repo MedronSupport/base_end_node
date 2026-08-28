@@ -84,6 +84,8 @@ typedef enum
   CFG_SEQ_Task_ReadRFIDEvent,
   CFG_SEQ_Task_SendRFIDEvent,
   CFG_SEQ_Task_RfidAckTimeoutEvent,
+  CFG_SEQ_Task_BufferedAckTimeoutEvent,
+  CFG_SEQ_Task_SendBufferedRFIDEvent,
   CFG_SEQ_Task_StatusMSGEvent,
   /* USER CODE END CFG_SEQ_Task_Id_t */
   CFG_SEQ_Task_NBR

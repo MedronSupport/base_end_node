@@ -903,6 +903,48 @@ pcb_result_t pcb_get_latest(
     return PCB_OK;
 }
 
+pcb_result_t pcb_get_latest_by_status(
+    const pcb_handle_t *handle,
+    pcb_record_status_t status,
+    pcb_record_t *out_record)
+{
+    if ((handle == NULL) ||
+        (out_record == NULL) ||
+        !pcb_status_is_valid(status))
+    {
+        return PCB_ERROR_INVALID_ARGUMENT;
+    }
+
+    if (!handle->initialized)
+    {
+        return PCB_ERROR_NOT_INITIALIZED;
+    }
+
+    if (handle->count == 0U)
+    {
+        return PCB_ERROR_EMPTY;
+    }
+
+    for (uint16_t offset = 0U; offset < handle->count; ++offset)
+    {
+        const uint16_t logical =
+            (uint16_t)(handle->count - 1U - offset);
+
+        const uint16_t physical =
+            pcb_physical_index_from_oldest(handle, logical);
+
+        const pcb_record_t *record = &handle->records[physical];
+
+        if (record->status == (uint8_t)status)
+        {
+            *out_record = *record;
+            return PCB_OK;
+        }
+    }
+
+    return PCB_ERROR_NOT_FOUND;
+}
+
 pcb_result_t pcb_get_last_n(
     const pcb_handle_t *handle,
     size_t requested_count,

@@ -114,6 +114,12 @@ pcb_result_t pcb_get_latest(
     const pcb_handle_t *handle,
     pcb_record_t *out_record);
 
+/* Newest record matching the selected status (PCB_ERROR_NOT_FOUND if none). */
+pcb_result_t pcb_get_latest_by_status(
+    const pcb_handle_t *handle,
+    pcb_record_status_t status,
+    pcb_record_t *out_record);
+
 /* Results are returned oldest-to-newest within the selected result set. */
 pcb_result_t pcb_get_last_n(
     const pcb_handle_t *handle,
