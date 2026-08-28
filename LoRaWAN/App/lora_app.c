@@ -331,7 +331,7 @@ static UTIL_TIMER_Object_t RfidReadTimeoutTimer;
 static UTIL_TIMER_Object_t StatusMessageTimeoutTimer;
 static UTIL_TIMER_Object_t RetryStatusTimer;
 static UTIL_TIMER_Time_t RFID_TIMEOUT = MFRC_RFID_READ_TIMEOUT;
-static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 3600000;
+static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 60000;
 static UTIL_TIMER_Time_t RETRY_STATUS_TIMEOUT= 15000;
 static uint8_t AppDataBuffer[LORAWAN_APP_DATA_BUFFER_MAX_SIZE];
 /**
@@ -345,6 +345,7 @@ static uint8_t UplinkCounter = 0;
 
 static UTIL_TIMER_Object_t JoinRetryTimer;
 static uint8_t JoinRetryCount = 0;
+static volatile bool join_in_progress = false;
 
 volatile bool stop_read_rfid=false;
 static bool RfidStopLockActive = false;
@@ -365,6 +366,39 @@ static UTIL_TIMER_Object_t BufferAckTimeoutTimer;
 /********************ACK UNSUCCESSFULL TRY **************/
 static uint8_t un_successfull_ack_response=0;
 #define MAX_UNSUCCESS_ACK_COUNT 5
+
+/********************SERVER TIME SYNC (downlink) **************/
+/* Sunucudan (e5/down/$deveui uzerinden) gelen zaman senkronizasyon mesaji.
+ * Format: [0]=tip byte (LORA_DOWNLINK_MSG_TYPE_TIME_SYNC), [1:4]=Unix epoch,
+ * saniye, big-endian. RTC bu projede RTC_BINARY_ONLY modunda (bkz rtc.c),
+ * takvim/HAL_RTC_SetTime kullanilamiyor - bu yuzden epoch'u yazilimsal olarak
+ * UTIL_TIMER_GetCurrentTime() referansiyla takip ediyoruz (STOP2 uykusunda da
+ * dogru ilerler, HAL_GetTick()'in aksine). */
+#define LORA_DOWNLINK_MSG_TYPE_TIME_SYNC 0x01
+static uint32_t g_deviceUnixEpoch = 0;
+static uint32_t g_deviceEpochSetAtMs = 0;
+static volatile bool g_deviceTimeIsSynced = false;
+/* Kacinci status gonderildigi (0'dan baslar, her basarili LmHandlerSend
+ * cagrisinda bir artar, HER BASARILI (RE)JOIN'DE de sifirlanir - bkz
+ * OnJoinRequest). Sadece TAZELIK KONTROLU icin kullanilir - herhangi bir
+ * aritmetik gecikme telafisi YAPILMAZ: sunucu bu degeri time-sync yanitinda
+ * aynen geri gonderiyor, biz de OnRxData'da bunu bizim EN SON gonderdigimiz
+ * status'un sayaciyla karsilastirip SADECE ESITSE kabul ediyoruz. Esit
+ * degilse (stale/gecikmis bir yanitsa) yanit sessizce reddediliyor - bir
+ * sonraki status turunde round-trip yetisirse zaten taze bir yanit gelip
+ * eslesecek. Rejoin'de sifirlama sart, aksi halde join-tetikli downlink
+ * (Python hep status_count=0 ile gonderiyor) join sonrasi ilk status'tan
+ * baska bir sayaca hicbir zaman denk gelmez. */
+static uint32_t g_statusSendCounter = 0;
+
+static uint32_t GetCurrentUnixTime(void)
+{
+	if (!g_deviceTimeIsSynced)
+	{
+		return 0U;
+	}
+	return g_deviceUnixEpoch + (uint32_t)((UTIL_TIMER_GetCurrentTime() - g_deviceEpochSetAtMs) / 1000U);
+}
 /* USER CODE END PV */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -542,12 +576,20 @@ static void OnStatusMessageHandler(void)
 
 
 
-	  /* 6 byte payload:
-	   *   [0]   uplink counter
-	   *   [1]   type = 0x27 (LORA_RFID_MSG_TYPE_STATUS)
-	   *   [2:3] batarya gerilimi mV, big endian
-	   *   [4:5] sicaklik Q8.8 (deger/256.0 = derece C), big endian
+	  /* 14 byte payload:
+	   *   [0]     uplink counter
+	   *   [1]     type = 0x27 (LORA_RFID_MSG_TYPE_STATUS)
+	   *   [2:3]   batarya gerilimi mV, big endian
+	   *   [4:5]   sicaklik Q8.8 (deger/256.0 = derece C), big endian
+	   *   [6:9]   kacinci status gonderimi (uint32, big endian, her rejoin'de
+	   *           sifirlanir - bkz OnJoinRequest) - sunucu bunu ayni deger
+	   *           olarak time-sync downlink'inde geri gonderiyor, biz de
+	   *           OnRxData'da sadece TAZELIK KONTROLU icin kullaniyoruz
+	   *           (esitse kabul, degilse reddet - aritmetik telafi yok).
+	   *   [10:13] cihazin gonderim anindaki guncel epoch tahmini (GetCurrentUnixTime,
+	   *           sn, big endian)
 	   */
+	  uint32_t statusNowEpoch = GetCurrentUnixTime();
 	  AppData.Port = LORAWAN_USER_APP_PORT;
 	  AppData.Buffer[0] = UplinkCounter++;
 	  AppData.Buffer[1] = LORA_RFID_MSG_TYPE_STATUS;
@@ -555,13 +597,22 @@ static void OnStatusMessageHandler(void)
 	  AppData.Buffer[3] = (uint8_t)(bat_adc_val & 0xFF);
 	  AppData.Buffer[4] = (uint8_t)(((uint16_t)bat_temp_q8_8 >> 8) & 0xFF);
 	  AppData.Buffer[5] = (uint8_t)((uint16_t)bat_temp_q8_8 & 0xFF);
-	  AppData.BufferSize = 6;
+	  AppData.Buffer[6] = (uint8_t)((g_statusSendCounter >> 24) & 0xFF);
+	  AppData.Buffer[7] = (uint8_t)((g_statusSendCounter >> 16) & 0xFF);
+	  AppData.Buffer[8] = (uint8_t)((g_statusSendCounter >> 8) & 0xFF);
+	  AppData.Buffer[9] = (uint8_t)(g_statusSendCounter & 0xFF);
+	  AppData.Buffer[10] = (uint8_t)((statusNowEpoch >> 24) & 0xFF);
+	  AppData.Buffer[11] = (uint8_t)((statusNowEpoch >> 16) & 0xFF);
+	  AppData.Buffer[12] = (uint8_t)((statusNowEpoch >> 8) & 0xFF);
+	  AppData.Buffer[13] = (uint8_t)(statusNowEpoch & 0xFF);
+	  AppData.BufferSize = 14;
 
 	  status_data_pending_on_lora = true;
 	  LmHandlerErrorStatus_t sendStatus = LmHandlerSend(&AppData, LORAMAC_HANDLER_CONFIRMED_MSG, false);
 	  if (LORAMAC_HANDLER_SUCCESS == sendStatus)
 	  {
-		  APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS SEND REQUEST (bat=%d mV) - ACK bekleniyor\r\n", bat_adc_val);
+		  g_statusSendCounter++;
+		  APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS SEND REQUEST (bat=%d mV, sayac=%u) - ACK bekleniyor\r\n", bat_adc_val, g_statusSendCounter - 1U);
 	  }
 	  else
 	  {
@@ -652,7 +703,7 @@ static void SendBufferedRfidLogHandler(void) {
 
 
 
-		APP_LOG(TS_ON, VLEVEL_M,"RFID LOG: recordid: %d, timestamp id:%d,len:%d\r\n",unsended_record.record_id,unsended_record.timestamp,unsended_record.uuid_length);
+		APP_LOG(TS_ON, VLEVEL_M,"RFID LOG: recordid: %d, timestamp id:%u,len:%d\r\n",unsended_record.record_id,(unsigned int)unsended_record.timestamp,unsended_record.uuid_length);
 		if (unsended_record.uuid_length == 7) {
 			APP_LOG(TS_OFF, VLEVEL_M, "\t\t\t CARD ID:%02X %02X %02X %02X %02X %02X %02X\r\n",
 					unsended_record.uuid[0], unsended_record.uuid[1], unsended_record.uuid[2], unsended_record.uuid[3], unsended_record.uuid[4], unsended_record.uuid[5], unsended_record.uuid[6]);
@@ -664,14 +715,18 @@ static void SendBufferedRfidLogHandler(void) {
 		brf_data_record_id=unsended_record.record_id;
 
 		LmHandlerErrorStatus_t status = LORAMAC_HANDLER_ERROR;
-		/* 14 byte payload:
+		/* 18 byte payload:
 		 *
 		 *   [0]   	uplink counter
 		 *   [1]		type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:ind
-		 *   [2:5] 	timestamp 4 byte big endian
+		 *   [2:5] 	kaydin timestamp'i (kart okunduğu an), 4 byte big endian
 		 *   [6]   	uid length
-		 *   [7:13]   uid - 7 byte  big endian
+		 *   [7:13]   uid - 7 byte big endian
+		 *   [14:17]  cihazin GONDERIM anindaki guncel epoch tahmini (GetCurrentUnixTime,
+		 *            sn, big endian) - bu bir RETRY oldugu icin [2:5]'ten farkli
+		 *            olabilir; sunucu tarafinda time-sync tracker icin kullanilabilir.
 		 */
+		uint32_t bufferedNowEpoch = GetCurrentUnixTime();
 
 		AppData.Port = LORAWAN_USER_APP_PORT;
 		AppData.Buffer[0] = UplinkCounter++;
@@ -692,7 +747,11 @@ static void SendBufferedRfidLogHandler(void) {
 				AppData.Buffer[7+j] = 0x00;
 			}
 		}
-		AppData.BufferSize = 14;
+		AppData.Buffer[14] = (uint8_t)((bufferedNowEpoch >> 24) & 0xFF);
+		AppData.Buffer[15] = (uint8_t)((bufferedNowEpoch >> 16) & 0xFF);
+		AppData.Buffer[16] = (uint8_t)((bufferedNowEpoch >> 8) & 0xFF);
+		AppData.Buffer[17] = (uint8_t)(bufferedNowEpoch & 0xFF);
+		AppData.BufferSize = 18;
 		UTIL_TIMER_Time_t nextTxIn = 0;
 
 
@@ -738,8 +797,9 @@ static void SendBufferedRfidLogHandler(void) {
 static void SendRFID_Data(void) {
 	APP_LOG(TS_OFF, VLEVEL_M, "###### Send RFID has triggered... \r\n");
 	if (uuid_val_rfid.is_uuid_data_assigned) {
-		//TEST TIMESTAMP
-		  uint32_t timestamp=1785860967;
+		  /* Sunucudan zaman senkronizasyonu henuz gelmediyse 0 doner - eski
+		   * sabit test degeri (1785860967) kaldirildi. */
+		  uint32_t timestamp=GetCurrentUnixTime();
 		APP_LOG(TS_OFF, VLEVEL_M, "###### New uuid to send \r\n");
 
 		  g_lastSentTimestamp = timestamp;
@@ -761,7 +821,7 @@ static void SendRFID_Data(void) {
 
 			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
 			  if (bufferResult == PCB_OK) {
-				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %lu, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
+				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %u, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
 			  } else {
 				  USER_LOG("Record add error: %d", bufferResult);
 			  }
@@ -769,14 +829,19 @@ static void SendRFID_Data(void) {
 			return;
 		}
 		LmHandlerErrorStatus_t status = LORAMAC_HANDLER_ERROR;
-		  /* 14 byte payload:
+		  /* 18 byte payload:
 		   *
 		   *   [0]   	uplink counter
 		   *   [1]		type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:ind
-		   *   [2:5] 	timestamp 4 byte big endian
+		   *   [2:5] 	timestamp 4 byte big endian (kart okundugu an)
 		   *   [6]   	uid length
 		   *   [7:13]   uid - 7 byte  big endian
+		   *   [14:17]  cihazin GONDERIM anindaki guncel epoch tahmini (GetCurrentUnixTime,
+		   *            sn, big endian) - canli gonderimde [2:5] ile pratikte ayni/yakin
+		   *            olur, ama diger mesaj tiplerinde de ayni sabit konumda bu alan
+		   *            bulunsun diye tutarlilik icin ekleniyor.
 		   */
+		  uint32_t liveNowEpoch = GetCurrentUnixTime();
 
 		  AppData.Port = LORAWAN_USER_APP_PORT;
 		  AppData.Buffer[0] = UplinkCounter++;
@@ -797,7 +862,11 @@ static void SendRFID_Data(void) {
 				  AppData.Buffer[7+i] = 0;
 			  }
 		  }
-		  AppData.BufferSize = 14;
+		  AppData.Buffer[14] = (uint8_t)((liveNowEpoch >> 24) & 0xFF);
+		  AppData.Buffer[15] = (uint8_t)((liveNowEpoch >> 16) & 0xFF);
+		  AppData.Buffer[16] = (uint8_t)((liveNowEpoch >> 8) & 0xFF);
+		  AppData.Buffer[17] = (uint8_t)(liveNowEpoch & 0xFF);
+		  AppData.BufferSize = 18;
 		  UTIL_TIMER_Time_t nextTxIn = 0;
 
 
@@ -822,7 +891,7 @@ static void SendRFID_Data(void) {
 		    rfid_data_pending_on_lora = false;
 			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
 			  if (bufferResult == PCB_OK) {
-				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %lu, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
+				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %u, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
 			  } else {
 				  USER_LOG("Record add error: %d", bufferResult);
 			  }
@@ -835,7 +904,7 @@ static void SendRFID_Data(void) {
 
 			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
 			  if (bufferResult == PCB_OK) {
-				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %lu, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
+				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %u, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
 			  } else {
 				  USER_LOG("Record add error: %d", bufferResult);
 			  }
@@ -920,12 +989,21 @@ static void ReadRFIDCard(void) {
 }
 static void TryJoin(void)
 {
+  if (join_in_progress)
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "###### TryJoin zaten surüyor, atlandi\r\n");
+    return;
+  }
+  join_in_progress = true;
+
   APP_LOG(TS_OFF, VLEVEL_M, "###### TryJoin() tetiklendi - zorla rejoin\r\n");
  // UTIL_TIMER_Stop(&TxTimer);
 
   if (LORAMAC_HANDLER_SUCCESS != LmHandlerStop())
   {
     APP_LOG(TS_OFF, VLEVEL_M, "LmHandler Stop on going ...\r\n");
+    join_in_progress = false;
+    return;
   }
 
   LmHandlerConfigure(&LmHandlerParams);
@@ -948,11 +1026,52 @@ static void OnRxData(LmHandlerAppData_t *appData, LmHandlerRxParams_t *params)
 	    APP_LOG(TS_OFF, VLEVEL_M, "###### D/L FRAME: port %d, %d byte(s), RSSI %d, SNR %d\r\n",
 	            appData->Port, appData->BufferSize, params->Rssi, params->Snr);
 
-	    /* One byte on the user port drives the LED: 0x00 = off, 0x01 = on */
-	    if ((appData->Port == LORAWAN_USER_APP_PORT) &&
-	        (appData->BufferSize == 1) && (appData->Buffer != NULL))
+	    if ((appData->BufferSize > 0) && (appData->Buffer != NULL))
 	    {
+	    	APP_LOG(TS_OFF, VLEVEL_M, "###### D/L mesaj tipi: 0x%02X, cihazin bildigi guncel epoch: %u\r\n",
+	    			appData->Buffer[0], (unsigned int)GetCurrentUnixTime());
+	    }
 
+	    /* Sunucudan zaman senkronizasyonu: [0]=tip, [1:4]=Unix epoch (sn, big-endian),
+	     * [5:8]=sunucunun bu yaniti hesapladigi andaki status sayaci (uint32,
+	     * big-endian, bkz g_statusSendCounter).
+	     *
+	     * TAZELIK KONTROLU (aritmetik telafi YOK): yanittaki sayac, bizim EN SON
+	     * gonderdigimiz status'un sayaciyla (g_statusSendCounter - 1) birebir
+	     * ESITSE bu yanit taze demektir, epoch dogrudan kabul edilir. Esit
+	     * degilse (stale/gecikmis bir yanitsa, veya baska bir sebeple sayac
+	     * tutmuyorsa) yanit sessizce reddedilir - bozuk/eski bir epoch'u
+	     * kabul edip cihaz saatini yanlislikla kaydirmaktansa, bir sonraki
+	     * status turunde round-trip yetisip taze bir yanit gelmesini bekleriz. */
+	    if ((appData->Port == LORAWAN_USER_APP_PORT) &&
+	        (appData->BufferSize == 9) && (appData->Buffer != NULL) &&
+	        (appData->Buffer[0] == LORA_DOWNLINK_MSG_TYPE_TIME_SYNC))
+	    {
+	    	uint32_t receivedEpoch = ((uint32_t)appData->Buffer[1] << 24) |
+	    			((uint32_t)appData->Buffer[2] << 16) |
+	    			((uint32_t)appData->Buffer[3] << 8) |
+	    			((uint32_t)appData->Buffer[4]);
+	    	uint32_t receivedStatusCount = ((uint32_t)appData->Buffer[5] << 24) |
+	    			((uint32_t)appData->Buffer[6] << 16) |
+	    			((uint32_t)appData->Buffer[7] << 8) |
+	    			((uint32_t)appData->Buffer[8]);
+	    	uint32_t currentStatusCount = (g_statusSendCounter > 0U) ? (g_statusSendCounter - 1U) : 0U;
+
+	    	if (receivedStatusCount == currentStatusCount)
+	    	{
+	    		g_deviceUnixEpoch = receivedEpoch;
+	    		g_deviceEpochSetAtMs = UTIL_TIMER_GetCurrentTime();
+	    		g_deviceTimeIsSynced = true;
+
+	    		APP_LOG(TS_OFF, VLEVEL_M, "###### TIME SYNC alindi: epoch=%u, sayac=%u\r\n",
+	    				(unsigned int)receivedEpoch, (unsigned int)receivedStatusCount);
+	    	}
+	    	else
+	    	{
+	    		APP_LOG(TS_OFF, VLEVEL_M,
+	    				"###### TIME SYNC reddedildi (stale): yanit_sayac=%u, mevcut_sayac=%u\r\n",
+	    				(unsigned int)receivedStatusCount, (unsigned int)currentStatusCount);
+	    	}
 	    }
 	  }
   /* USER CODE END OnRxData_1 */
@@ -1060,7 +1179,7 @@ static void OnTxData(LmHandlerTxParams_t *params)
 
 				pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
 				if (bufferResult == PCB_OK) {
-					APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %lu, Count: %u",lastRecordId, g_lastSentTimestamp,(unsigned int )pcb_count(&eventBuffer));
+					APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %u, Count: %u",lastRecordId, g_lastSentTimestamp,(unsigned int )pcb_count(&eventBuffer));
 				} else {
 					USER_LOG("Record add error: %d", bufferResult);
 				}
@@ -1142,8 +1261,13 @@ static void OnTxData(LmHandlerTxParams_t *params)
 static void OnJoinRequest(LmHandlerJoinParams_t *joinParams) {
 	/* USER CODE BEGIN OnJoinRequest_1 */
 	if (joinParams != NULL) {
+		join_in_progress = false;
 		if (joinParams->Status == LORAMAC_HANDLER_SUCCESS) {
 			JoinRetryCount = 0;
+			/* Sunucu join event'inde time-sync downlink'ini HER ZAMAN
+			 * status_count=0 varsayimiyla gonderiyor - bu varsayimin
+			 * gecerli kalmasi icin sayaci burada sifirliyoruz. */
+			g_statusSendCounter = 0;
 			APP_LOG(TS_OFF, VLEVEL_M, "\r\n###### = JOINED = %s ======\r\n",
 					(joinParams->Mode == ACTIVATION_TYPE_ABP) ? "ABP " : "OTAA");
 			UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_StatusMSGEvent), CFG_SEQ_Prio_status_1);
