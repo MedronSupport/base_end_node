@@ -26,6 +26,7 @@
 
 /* USER CODE BEGIN Includes */
 #include "sys_app.h"
+#include "../../external_libs/watchdog/Inc/app_watchdog.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -98,7 +99,10 @@ void PWR_EnterStopMode(void)
   LL_PWR_ClearFlag_C1STOP_C1STB();
 
   /* USER CODE BEGIN EnterStopMode_2 */
-
+  /* IWDG kick - sequencer gercekten Stop2'ye donebiliyor mu, tek dogrulama
+   * noktasi burasi. Bir task/surucu takilip buraya hic gelinemezse IWDG
+   * suresi dolar ve cihaz resetlenir - bkz external_libs/watchdog. */
+  AppWatchdog_Refresh();
   /* USER CODE END EnterStopMode_2 */
   HAL_PWREx_EnterSTOP2Mode(PWR_STOPENTRY_WFI);
   /* USER CODE BEGIN EnterStopMode_3 */
@@ -121,7 +125,7 @@ void PWR_ExitStopMode(void)
   /* Resume not retained USARTx and DMA */
   vcom_Resume();
   /* USER CODE BEGIN ExitStopMode_2 */
-  APP_LOG(TS_OFF, VLEVEL_M, "STOP2'den uyanildi (toplam giris: %lu)\r\n", g_stopModeEntryCount);
+  APP_LOG(TS_OFF, VLEVEL_M, "STOP2'den uyanildi (toplam giris: %u)\r\n", (unsigned int)g_stopModeEntryCount);
   /* USER CODE END ExitStopMode_2 */
 }
 

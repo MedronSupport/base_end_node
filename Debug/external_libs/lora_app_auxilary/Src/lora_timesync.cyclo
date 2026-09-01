@@ -1,0 +1,8 @@
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:48:6:LoraTimeSync_Init	1
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:54:6:LoraTimeSync_OnJoined	1
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:60:10:LoraTimeSync_GetCounterForStatusSend	3
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:69:6:LoraTimeSync_OnStatusQueued	2
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:78:6:LoraTimeSync_OnStatusAckResult	1
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:83:6:LoraTimeSync_HandleDownlink	6
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:123:6:LoraTimeSync_IsSynced	1
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:128:10:LoraTimeSync_GetCurrentUnixTime	2

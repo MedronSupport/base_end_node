@@ -32,6 +32,7 @@
 #include "persistent_circular_buffer.h"
 
 #include "../../external_libs/adc_bat_meas/Inc/adc_bat_meas.h"
+#include "../../external_libs/watchdog/Inc/app_watchdog.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -110,7 +111,7 @@ int main(void)
   MX_RTC_Init();
   MX_LoRaWAN_Init();
   /* USER CODE BEGIN 2 */
-
+  AppWatchdog_Init();
   /* USER CODE END 2 */
 
   /* Infinite loop */

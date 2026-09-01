@@ -154,6 +154,73 @@ Her test: **Ön Koşul → Adımlar → Beklenen Sonuç**. UART log çıktısı 
 
 ## I. Bilinen Açık Konular (bu test planının kapsamı dışında, takip gerektirir)
 
-- **TryJoin() reentrancy koruması yok** (derin incelemenin 5. maddesi) — henüz düzeltilmedi. Test için: birden fazla tetikleyicinin (RFID + status + 5-strike) çok kısa aralıkla üst üste rejoin tetiklediği bir senaryo kurgulanabilir, `LmHandlerStop()`'un "on going" logunun ardından yine de `Configure`+`Join` çağrıldığını gözlemleyip stack davranışını izlemek gerekir.
-- **Flash senkron sırasında RX penceresi stall riski** (derin incelemenin 3. maddesi) — STM32WL referans kılavuzundan flash bank mimarisi teyit edilmeli; ardından yoğun buffer-drain trafiği sırasında ACK başarı oranının izole gönderimlere göre düştüğü istatistiksel olarak test edilebilir.
-- **LoRaWAN sürüm uyuşmazlığı** (`docs/milesight-ug63-lorawan-version-mismatch.md`) — üretici cevabı bekleniyor.
+- **[KAPATILDI] TryJoin() reentrancy koruması yok** (derin incelemenin 5. maddesi) — yeniden incelendi (bu oturumda): `join_in_progress` guard'ı (`lora_app.c:1103-1140`, giriş kilidi + `LmHandlerStop()` başarısızlığında geri alma) ve 35 sn'lik `JoinTimeoutHandler` güvenlik supabı bunu zaten önlüyor. Ayrıca 7 tetikleyicinin (RFID/status join-yok dalları, 5-strike, buffer handler, `JoinRetryTimer`) hepsi `TryJoin`'i doğrudan çağırmak yerine `UTIL_SEQ_SetTask` ile bayrak koyuyor; sequencer run-to-completion olduğu için gerçek reentrancy zaten mimari olarak mümkün değil.
+  - **I1 — Doğrulama testi (önerilir, henüz koşulmadı):** RFID + status + 5-strike tetikleyicilerinin çok kısa aralıkla (aynı sequencer tick'i içinde) üst üste rejoin tetiklemesini kurgula (örn. gateway kapalıyken art arda birkaç kart okut + status timeout'u aynı ana denk getir). **Beklenen:** loglarda `"TryJoin zaten surüyor, atlandi"` mesajı görülmeli (guard çalışıyor), `LmHandlerJoin()` asla üst üste iki kez çağrılmamalı, cihaz kalıcı olarak "rejoin yapamaz" duruma düşmemeli.
+
+- **Flash senkron sırasında RX penceresi stall riski** (derin incelemenin 3. maddesi) — **mimari soru netleşti** (bu oturumda): `stm32wlxx_hal_flash.h` incelendi, `FLASH_EraseInitTypeDef`'te bank alanı yok, 128×2KB düz sayfa uzayı (`FLASH_PAGE_NB=128`, `FLASH_PAGE_SIZE=0x800`) — yani **STM32WLE5 tek banklı flash**, read-while-write desteği yok, bir sayfa erase/program sırasında CPU (interrupt dahil) tamamen duruyor (`FLASH_TIMEOUT_VALUE=1000` ms, HAL'in kabul ettiği azami süre). Mimari risk gerçek ve kalıcı.
+  - Ancak güncel kodda `pcb_sync`/`pcb_add`'in her çağrı noktası izlendi: hepsi bir gönderim denemesinden ÖNCE ya da bir ACK/timeout kesinleştikten SONRA çalışıyor; proje genelindeki karşılıklı dışlama bayrakları (`rfid_data_pending_on_lora`, `buffered_rfid_data_wait_for_ack`, `status_data_pending_on_lora`) aynı anda tek bir confirmed uplink'e izin verdiği için, "bir mesajın RX penceresi açıkken başka bir flash yazımı araya girsin" senaryosunun şu an canlı/gözlemlenebilir bir tetikleyici yolu yok.
+  - **I2 — İstatistiksel doğrulama (hâlâ önerilir, ama artık düşük öncelik):** yoğun buffer-drain trafiği sırasında (D2 senaryosu, 3+ art arda kayıt) ACK başarı oranının izole gönderimlere göre gözle görülür şekilde düştüğü gözlemlenirse, bu maddeye geri dönülmeli — LoRaMAC'in kendi iç housekeeping görevinin (`CFG_SEQ_Task_LmHandlerProcess`) bir flash yazımıyla art arda gelmesi hâlâ birkaç on ms'lik bir gecikmeye yol açabilir.
+
+- **LoRaWAN sürüm uyuşmazlığı** (`docs/milesight-ug63-lorawan-version-mismatch.md`) — üretici cevabı bekleniyor, değişiklik yok.
+
+---
+
+## J. Zaman Senkronizasyonu (`lora_timesync` kütüphanesi, bu oturumda eklendi)
+
+**Kapsam notu:** `g_deviceUnixEpoch`/`g_deviceEpochSetAtMs` yerine STM32CubeWL'in RTC yedek registerlarına dayanan `SysTimeSet()`/`SysTimeGet()` + kendi "SYNC" işareti (`RTC_BKP_DR3`) kullanılıyor — bkz. `external_libs/lora_app_auxilary/`.
+
+### J1 — İlk açılışta/senkron öncesi `GetCurrentUnixTime()` 0 dönmeli
+- **Ön koşul:** Cihaz gerçek bir power-on sıfırlaması geçirmiş (backup domain temiz), hiçbir zaman senkron downlink'i alınmamış.
+- **Adımlar:** Join ol, sunucudan zaman senkron downlink'i gelmeden bir STATUS veya RFID mesajı gönder.
+- **Beklenen:** Payload'daki epoch alanı (statusNowEpoch / liveNowEpoch) 0; `LoraTimeSync_IsSynced()` false.
+
+### J2 — Doğru sayaçla gelen zaman senkron downlink'i kabul edilmeli
+- **Ön koşul:** Cihaz join olmuş, en az bir STATUS mesajı gönderilmiş (log'da "sayac=X" görülmüş).
+- **Adımlar:** Sunucudan `LORAWAN_USER_APP_PORT`'a 9 byte'lık downlink gönder: `[0]=0x01`, `[1:4]=epoch`, `[5:8]=X` (cihazın son gönderdiği status sayacı).
+- **Beklenen:** `"###### TIME SYNC alindi: epoch=..."` logu; sonraki `GetCurrentUnixTime()` çağrıları bu epoch'tan itibaren gerçek zamanlı ilerler.
+
+### J3 — Yanlış/eski sayaçla gelen downlink reddedilmeli (stale koruması)
+- **Adımlar:** J2 ile aynı downlink'i, `[5:8]` alanına bilinçli yanlış bir sayaç koyarak gönder.
+- **Beklenen:** Hiçbir log basılmaz (tasarım gereği sessiz red), epoch/`IsSynced()` değişmez.
+
+### J4 — Reset sonrası senkron bilgisinin korunması (bu modülün asıl motivasyonu)
+- **Ön koşul:** J2 ile senkron olunmuş.
+- **Adımlar:** Cihazı `NVIC_SystemReset()` veya watchdog ile resetle (**VDD kesme değil**).
+- **Beklenen:** Reset sonrası `IsSynced()` true kalır; ilk STATUS/RFID payload'ındaki epoch 0 DEĞİL, gerçek zamana yakın bir değerdir. *(Eski RAM-only `g_deviceUnixEpoch` yaklaşımında bu test başarısız olurdu — asıl regresyon noktası burası.)*
+
+### J5 — Gerçek güç kaybında senkron bilgisi kaybolmalı (beklenen davranış, bug değil)
+- **Adımlar:** Backup domain dahil VDD'yi kes, tekrar ver.
+- **Beklenen:** `IsSynced()` false'a döner, yeni senkron döngüsü gerekir — bkz. [[pcb-flash-erase-resets-count]] ile aynı kategoriden "beklenen sıfırlanma".
+
+### J6 — ACK alınamayan STATUS retry'ında sayaç ilerlememeli
+- **Ön koşul:** STATUS gönderildi, ACK gelmedi (bkz. E1, `RetryStatusTimer` devrede).
+- **Adımlar:** Retry denemesindeki `"sayac=X"` log değerini ilk denemeyle karşılaştır.
+- **Beklenen:** İkisi de AYNI X değerini taşır — sunucudan gecikmeli gelen bir J2 yanıtı bile retry denemesini "taze" kabul edebilmeli.
+
+---
+
+## K. Modülerleştirme Refactor Regresyon Testleri (`PersistFailedRfidSend` / `OnTimerFiresSetTask` / `WriteU32BE`)
+
+### K1 — Derleme kontrolü (ön koşul, en ucuz/en kritik test)
+- **Adımlar:** `Build All`, tüm warning çıktısını incele.
+- **Beklenen:** Sıfır hata, yeni warning yok — özellikle "unused variable" (eski `bufferResult` kopyaları) ve `OnTimerFiresSetTask`'ın `(void*)&kXxxBinding` cast'leri için pointer tipi uyarısı olmamalı.
+
+### K2 — 7 timer'ın doğru task+priority ile tetiklenmesi
+- **Not:** Ayrı bir test gerekmez — A-F bölümündeki senaryolar (B4, D4, E1, F1 vb.) zaten her timer'ı en az bir kez tetikliyor; o senaryoların beklenen logları aynen çıkıyorsa binding tablosu doğru çalışıyor demektir.
+- **Ek doğrulama:** E1 (periyodik `StatusMessageTimeoutTimer`) ve retry (`RetryStatusTimer`) denemelerinin ikisinde de RFID gönderimiyle aynı önceliği (`CFG_SEQ_Prio_status_1`) paylaştığını — yani status işleminin RFID görevleriyle çakıştığında beklenen sırayı koruduğunu — gözle.
+
+### K3 — `PersistFailedRfidSend`'in `pcb_sync` davranış değişikliği (RfidAckTimeoutHandler'a özel regresyon)
+- **Arka plan:** Refactor öncesi `RfidAckTimeoutHandler`'da `pcb_sync` SADECE `pcb_add` başarılıysa çağrılıyordu; artık (diğer 7 site ile tutarlı olacak şekilde) koşulsuz çağrılıyor.
+- **Ön koşul:** Buffer'ı doldur (`pcb_add` `PCB_FULL`/hata dönene kadar; gerekirse test için PCB kapasitesini geçici düşür).
+- **Adımlar:** Buffer doluyken B4 senaryosunu (RFID ACK timeout) tetikle.
+- **Beklenen:** `"Record add error: ..."` logu + hemen ardından bir flash sync denemesi de yapılır (yeni davranış). Fonksiyonel hata beklenmez; sadece dolu-buffer durumunda ekstra bir flash yazımı olduğunu doğrula.
+
+### K4 — `WriteU32BE` payload doğruluğu (saha/network server ile doğrulama)
+- **Ön koşul:** Network server'da (Milesight UG63) ham hex payload görüntüleme açık.
+- **Adımlar:** Bir STATUS ve bir canlı RFID mesajı gönder, ham payload'ı yakala.
+- **Beklenen:** STATUS: `byte[6:9]`=sayaç, `byte[10:13]`=epoch; RFID: `byte[2:5]`=timestamp, `byte[14:17]`=epoch — hepsi big-endian, refactor öncesiyle birebir aynı offset/format (bu oturumdaki değişiklik sadece yazım şeklini kısalttı, hiçbir byte konumunu değiştirmedi).
+
+### K5 — Duplicate flag düzeltmesinin doğrulanması (`SendRFID_Data` DUTYCYCLE_RESTRICTED dalı)
+- **Arka plan:** Refactor öncesi bu dalda `rfid_data_pending_on_lora = false;` iki kez yazılıyordu (zararsız ama gereksiz); tekilleştirildi.
+- **Adımlar:** B2 senaryosunu (duty-cycle kısıtlaması) tetikle.
+- **Beklenen:** Davranışta gözle görülür bir fark olmamalı — bu test sadece "hiçbir yan etki yok" doğrulaması içindir, ayrı bir log beklenmez.

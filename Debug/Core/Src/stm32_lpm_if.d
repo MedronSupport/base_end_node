@@ -25,6 +25,7 @@ Core/Src/stm32_lpm_if.o: ../Core/Src/stm32_lpm_if.c \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_flash_ex.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_gpio.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_gpio_ex.h \
+ ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_iwdg.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_pwr.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_pwr.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_pwr_ex.h \
@@ -49,7 +50,8 @@ Core/Src/stm32_lpm_if.o: ../Core/Src/stm32_lpm_if.c \
  ../Core/Inc/utilities_conf.h ../Drivers/CMSIS/Include/cmsis_compiler.h \
  ../Utilities/misc/stm32_mem.h ../Utilities/misc/stm32_tiny_vsnprintf.h \
  ../Core/Inc/utilities_def.h ../Core/Inc/usart.h ../Core/Inc/dma.h \
- ../Core/Inc/sys_app.h ../Core/Inc/sys_conf.h
+ ../Core/Inc/sys_app.h ../Core/Inc/sys_conf.h \
+ ../Core/Src/../../external_libs/watchdog/Inc/app_watchdog.h
 ../Core/Inc/platform.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/stm32wlxx.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/stm32wle5xx.h:
@@ -76,6 +78,7 @@ Core/Src/stm32_lpm_if.o: ../Core/Src/stm32_lpm_if.c \
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_flash_ex.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_gpio.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_gpio_ex.h:
+../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_iwdg.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_pwr.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_pwr.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_pwr_ex.h:
@@ -108,3 +111,4 @@ Core/Src/stm32_lpm_if.o: ../Core/Src/stm32_lpm_if.c \
 ../Core/Inc/dma.h:
 ../Core/Inc/sys_app.h:
 ../Core/Inc/sys_conf.h:
+../Core/Src/../../external_libs/watchdog/Inc/app_watchdog.h:

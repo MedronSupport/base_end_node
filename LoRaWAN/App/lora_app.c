@@ -42,6 +42,7 @@
 #include "stm32_lpm.h"
 #include "persistent_circular_buffer.h"
 #include "adc_bat_meas.h"
+#include "lora_timesync.h"
 #include <stdlib.h>
 /* USER CODE END Includes */
 
@@ -235,21 +236,25 @@ static void OnSystemReset(void);
 
 /* USER CODE BEGIN PFP */
 static void TryJoin(void);
-static void OnJoinRetryTimerEvent(void *context);
+static void JoinTimeoutHandler(void);
 static void ReadRFIDCard(void);
 static void OnRfidReadTimeoutEvent(void *context);
 static void RfidPreventStopMode(void);
 static void RfidAllowStopMode(void);
 static void SendRFID_Data(void);
-static void OnRfidAckTimeoutEvent(void *context);
 static void RfidAckTimeoutHandler(void);
-static void OnStatusMsgTimeoutEvent(void *context);
+static void ResendRfidData(void);
 static void StatusMsgPreventStopMode(void);
 static void  StatusMsgAllowStopMode(void);
 static void OnStatusMessageHandler(void);
 static void SendBufferedRfidLogHandler(void);
-static void OnBufferAckTimeoutEvent(void *context);
 static void BufferAckTimeoutHandler(void);
+/* Yedi ayri "timer ates alinca sadece bir sequencer task'i tetikle"
+ * trampolin fonksiyonu (OnJoinRetryTimerEvent, OnJoinTimeoutEvent,
+ * OnRfidAckTimeoutEvent, OnRfidAckRetryTimerEvent, OnStatusMsgTimeoutEvent,
+ * OnBufferAckTimeoutEvent, OnBufferedDrainDelayEvent) yerine tek, parametrik
+ * bir trampolin - bkz USER CODE BEGIN PV icindeki binding sabitleri. */
+static void OnTimerFiresSetTask(void *context);
 /* USER CODE END PFP */
 
 /* Private variables ---------------------------------------------------------*/
@@ -333,6 +338,13 @@ static UTIL_TIMER_Object_t RetryStatusTimer;
 static UTIL_TIMER_Time_t RFID_TIMEOUT = MFRC_RFID_READ_TIMEOUT;
 static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 60000;
 static UTIL_TIMER_Time_t RETRY_STATUS_TIMEOUT= 15000;
+/* Buffer'dan bir kayit gonderilip ACK alindiktan sonra, bir sonraki kaydin
+ * gonderilmesinden once beklenecek sure. Onceden ACK gelir gelmez hemen bir
+ * sonraki kayit ard arda (aralarinda ~1 sn'den az) gonderiliyordu - bu, ACK
+ * sorunlarinin ard arda gonderimle iliskili olup olmadigini ayirt etmek ve
+ * radyo/duty-cycle ic ice binmesini azaltmak icin araya konan bir bekleme. */
+static UTIL_TIMER_Object_t BufferedDrainDelayTimer;
+#define BUFFERED_DRAIN_DELAY_MS 10000
 static uint8_t AppDataBuffer[LORAWAN_APP_DATA_BUFFER_MAX_SIZE];
 /**
   * @brief User application data structure
@@ -346,6 +358,21 @@ static uint8_t UplinkCounter = 0;
 static UTIL_TIMER_Object_t JoinRetryTimer;
 static uint8_t JoinRetryCount = 0;
 static volatile bool join_in_progress = false;
+/* GUVENLIK SUBAPI: TryJoin() -> LmHandlerJoin() cagirdiktan sonra OnJoinRequest()
+ * callback'i normalde birkac saniye icinde (RX1/RX2 join-accept pencereleri +
+ * islem suresi) gelmesi gerekir. Eger cesitli sebeplerle (ornegin ayni anda
+ * uzun suren bloklayici bir RFID okumasi sequencer'i mesgul edip LmHandlerProcess'in
+ * zamaninda calismasini engellerse) bu callback HIC gelmezse, join_in_progress
+ * kalici olarak true kalir ve TryJoin() bir daha asla calismaz - cihaz tamamen
+ * rejoin yapamaz hale gelir (gozlemlenen gercek bir arizaydi). Bu timer, callback
+ * makul bir surede gelmezse bayragi zorla temizleyip cihazi kurtarir. */
+/* Normal kosullarda (RX1~5sn + RX2~6sn + isleme payi) tek bir LmHandlerJoin()
+ * cagrisi ~7-8 sn'de sonuclanir. Buna, join sirasinda zaten baslamis olabilecek
+ * bir RFID okumasinin (~6 sn, bloklayici) sequencer'i meselgul etme ihtimalini
+ * ve genel islem payini (~2 sn) ekleyince gercekci en kotu senaryo ~16 sn'yi
+ * buluyor - 35 sn, bunun ~2.2 kati (Nyquist paylı) guvenlik marjidir. */
+#define JOIN_TIMEOUT_MS 35000
+static UTIL_TIMER_Object_t JoinTimeoutTimer;
 
 volatile bool stop_read_rfid=false;
 static bool RfidStopLockActive = false;
@@ -363,41 +390,104 @@ static uint8_t  g_lastSentUidLen;
 static uint16_t brf_data_record_id;
 static UTIL_TIMER_Object_t RfidAckTimeoutTimer;
 static UTIL_TIMER_Object_t BufferAckTimeoutTimer;
+/* Dogrudan RFID gonderiminde ACK alinamazsa, kaydi buffer'a dusurmeden once
+ * AYNI icerikle (ayni kart verisi, ayni okuma zamani - sadece gonderim anindaki
+ * epoch tazelenir) en fazla RFID_ACK_MAX_RETRY kez, aralarinda RFID_ACK_RETRY_DELAY_MS
+ * bekleyerek yeniden denenir. Tum denemeler tukenirse mevcut buffer akisina
+ * (persistent circular buffer) düşer. */
+static UTIL_TIMER_Object_t RfidAckRetryTimer;
+#define RFID_ACK_MAX_RETRY 2
+#define RFID_ACK_RETRY_DELAY_MS 5000
+static uint8_t rfid_ack_retry_count = 0;
 /********************ACK UNSUCCESSFULL TRY **************/
 static uint8_t un_successfull_ack_response=0;
 #define MAX_UNSUCCESS_ACK_COUNT 5
 
-/********************SERVER TIME SYNC (downlink) **************/
-/* Sunucudan (e5/down/$deveui uzerinden) gelen zaman senkronizasyon mesaji.
- * Format: [0]=tip byte (LORA_DOWNLINK_MSG_TYPE_TIME_SYNC), [1:4]=Unix epoch,
- * saniye, big-endian. RTC bu projede RTC_BINARY_ONLY modunda (bkz rtc.c),
- * takvim/HAL_RTC_SetTime kullanilamiyor - bu yuzden epoch'u yazilimsal olarak
- * UTIL_TIMER_GetCurrentTime() referansiyla takip ediyoruz (STOP2 uykusunda da
- * dogru ilerler, HAL_GetTick()'in aksine). */
-#define LORA_DOWNLINK_MSG_TYPE_TIME_SYNC 0x01
-static uint32_t g_deviceUnixEpoch = 0;
-static uint32_t g_deviceEpochSetAtMs = 0;
-static volatile bool g_deviceTimeIsSynced = false;
-/* Kacinci status gonderildigi (0'dan baslar, her basarili LmHandlerSend
- * cagrisinda bir artar, HER BASARILI (RE)JOIN'DE de sifirlanir - bkz
- * OnJoinRequest). Sadece TAZELIK KONTROLU icin kullanilir - herhangi bir
- * aritmetik gecikme telafisi YAPILMAZ: sunucu bu degeri time-sync yanitinda
- * aynen geri gonderiyor, biz de OnRxData'da bunu bizim EN SON gonderdigimiz
- * status'un sayaciyla karsilastirip SADECE ESITSE kabul ediyoruz. Esit
- * degilse (stale/gecikmis bir yanitsa) yanit sessizce reddediliyor - bir
- * sonraki status turunde round-trip yetisirse zaten taze bir yanit gelip
- * eslesecek. Rejoin'de sifirlama sart, aksi halde join-tetikli downlink
- * (Python hep status_count=0 ile gonderiyor) join sonrasi ilk status'tan
- * baska bir sayaca hicbir zaman denk gelmez. */
-static uint32_t g_statusSendCounter = 0;
+/* Zaman senkronizasyonunun tamami (epoch takibi, status sayaci, tazelik
+ * kontrolu) artik lora_timesync kutuphanesinde - bkz external_libs/
+ * lora_app_auxilary/{Inc,Src}/lora_timesync.{h,c}. */
 
-static uint32_t GetCurrentUnixTime(void)
+/* ---------------------------------------------------------------------
+ * ORTAK YARDIMCILAR - dosya genelinde tekrar eden desenleri tekillestirir.
+ * ------------------------------------------------------------------- */
+
+/**
+  * @brief  32-bit bir degeri buyuk-endian (big-endian) sirayla 4 baytlik
+  *         bir tampona yazar. Payload doldururken (epoch, sayaç, timestamp)
+  *         dosya boyunca tekrar eden "(v>>24)&0xFF, (v>>16)&0xFF, ..." dort
+  *         satirlik deseni tekillestirir.
+  * @param  buf   En az 4 bayt yer olan hedef tampon (AppData.Buffer[N] gibi).
+  * @param  value Yazilacak 32-bit deger.
+  */
+static inline void WriteU32BE(uint8_t *buf, uint32_t value)
 {
-	if (!g_deviceTimeIsSynced)
+	buf[0] = (uint8_t)((value >> 24) & 0xFF);
+	buf[1] = (uint8_t)((value >> 16) & 0xFF);
+	buf[2] = (uint8_t)((value >> 8) & 0xFF);
+	buf[3] = (uint8_t)(value & 0xFF);
+}
+
+/**
+  * @brief  Gonderilemeyen (ACK alinamayan) bir RFID okumasini kalici tampona
+  *         (persistent circular buffer) FAILED olarak yazar ve senkronize
+  *         eder. g_lastSentTimestamp/g_lastSentUid/g_lastSentUidLen'i kullanir
+  *         - bu yuzden cagirilmadan once bu degerlerin guncel olmasi sarttir
+  *         (SendRFID_Data ve ResendRfidData zaten bunu garanti eder).
+  * @note   Dosya genelinde 8 yerde tekrar eden "pcb_add + log + pcb_sync"
+  *         blogunu tekillestirir.
+  */
+static void PersistFailedRfidSend(void)
+{
+	pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid,
+			g_lastSentUidLen, PCB_STATUS_FAILED, &lastRecordId);
+	if (bufferResult == PCB_OK)
 	{
-		return 0U;
+		APP_LOG(TS_ON, VLEVEL_M, "Record added to RAM. ID: %u, Time: %u, Count: %u",
+				lastRecordId, g_lastSentTimestamp, (unsigned int)pcb_count(&eventBuffer));
 	}
-	return g_deviceUnixEpoch + (uint32_t)((UTIL_TIMER_GetCurrentTime() - g_deviceEpochSetAtMs) / 1000U);
+	else
+	{
+		USER_LOG("Record add error: %d", bufferResult);
+	}
+	pcb_sync(&eventBuffer);
+}
+
+/**
+  * @brief  Bir UTIL_TIMER_Object_t'yi belirli bir sequencer task'ina ve
+  *         onceliğine baglar. OnTimerFiresSetTask()'a UTIL_TIMER_Create()'in
+  *         "Argument" parametresiyle iletilir.
+  */
+typedef struct
+{
+	CFG_SEQ_Task_Id_t  TaskId;
+	CFG_SEQ_Prio_Id_t  Prio;
+} LoraTimerTaskBinding_t;
+
+/* Dosyadaki 7 ayri "timer ates alinca sadece bir sequencer task'i tetikle"
+ * trampolin fonksiyonunun (govdesi tek satir UTIL_SEQ_SetTask cagrisindan
+ * ibaret) yerini alan tek, parametrik binding tablosu. Her timer, kendi
+ * UTIL_TIMER_Create() cagrisinda bu sabitlerden birinin adresini "Argument"
+ * olarak gecer - bkz OnTimerFiresSetTask(). */
+static const LoraTimerTaskBinding_t kStatusMsgBinding        = { CFG_SEQ_Task_StatusMSGEvent,        CFG_SEQ_Prio_status_1 };
+static const LoraTimerTaskBinding_t kRfidAckTimeoutBinding   = { CFG_SEQ_Task_RfidAckTimeoutEvent,    CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kBufferAckTimeoutBinding = { CFG_SEQ_Task_BufferedAckTimeoutEvent, CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kBufferedDrainBinding    = { CFG_SEQ_Task_SendBufferedRFIDEvent,  CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kRfidAckRetryBinding     = { CFG_SEQ_Task_RfidAckRetryEvent,      CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kJoinRetryBinding        = { CFG_SEQ_Task_LoRaRejoinEvent,        CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kJoinTimeoutBinding      = { CFG_SEQ_Task_JoinTimeoutEvent,       CFG_SEQ_Prio_0 };
+
+/**
+  * @brief  Yukaridaki kStatusMsgBinding/kRfidAckTimeoutBinding/... sabitlerinden
+  *         birine bagli bir timer ates aldiginda cagrilir; o binding'in
+  *         belirttigi sequencer task'ini belirtilen oncelikle tetikler.
+  * @note   NOT: context NULL olamaz - bu fonksiyonu kullanan her
+  *         UTIL_TIMER_Create() cagrisi, bindings'lerden birinin adresini
+  *         Argument olarak vermelidir.
+  */
+static void OnTimerFiresSetTask(void *context)
+{
+	const LoraTimerTaskBinding_t *binding = (const LoraTimerTaskBinding_t *)context;
+	UTIL_SEQ_SetTask((1UL << binding->TaskId), binding->Prio);
 }
 /* USER CODE END PV */
 
@@ -427,27 +517,33 @@ void LoRaWAN_Init(void)
   /* USER CODE END LoRaWAN_Init_LV */
 
   /* USER CODE BEGIN LoRaWAN_Init_1 */
+  LoraTimeSync_Init();
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaRejoinEvent), UTIL_SEQ_RFU, TryJoin);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ReadRFIDEvent), UTIL_SEQ_RFU,ReadRFIDCard);
   UTIL_TIMER_Create(&RfidReadTimeoutTimer, RFID_TIMEOUT, UTIL_TIMER_ONESHOT, OnRfidReadTimeoutEvent, NULL);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_SendRFIDEvent), UTIL_SEQ_RFU, SendRFID_Data);
-  UTIL_TIMER_Create(&RfidAckTimeoutTimer, RFID_ACK_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnRfidAckTimeoutEvent, NULL);
+  UTIL_TIMER_Create(&RfidAckTimeoutTimer, RFID_ACK_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kRfidAckTimeoutBinding);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_RfidAckTimeoutEvent), UTIL_SEQ_RFU, RfidAckTimeoutHandler);
+  UTIL_TIMER_Create(&RfidAckRetryTimer, RFID_ACK_RETRY_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kRfidAckRetryBinding);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_RfidAckRetryEvent), UTIL_SEQ_RFU, ResendRfidData);
 
-  UTIL_TIMER_Create(&BufferAckTimeoutTimer, BUFFERED_ACK_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnBufferAckTimeoutEvent, NULL);
+  UTIL_TIMER_Create(&BufferAckTimeoutTimer, BUFFERED_ACK_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kBufferAckTimeoutBinding);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_BufferedAckTimeoutEvent), UTIL_SEQ_RFU, BufferAckTimeoutHandler);
 
   //Send Buffered RFID Data
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_SendBufferedRFIDEvent), UTIL_SEQ_RFU, SendBufferedRfidLogHandler);
+  UTIL_TIMER_Create(&BufferedDrainDelayTimer, BUFFERED_DRAIN_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kBufferedDrainBinding);
 
   //status message timer
-  UTIL_TIMER_Create(&StatusMessageTimeoutTimer, STATUS_MSG_TIMEOUT, UTIL_TIMER_PERIODIC, OnStatusMsgTimeoutEvent, NULL);
+  UTIL_TIMER_Create(&StatusMessageTimeoutTimer, STATUS_MSG_TIMEOUT, UTIL_TIMER_PERIODIC, OnTimerFiresSetTask, (void *)&kStatusMsgBinding);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_StatusMSGEvent), UTIL_SEQ_RFU, OnStatusMessageHandler);
 
-  UTIL_TIMER_Create(&RetryStatusTimer, RETRY_STATUS_TIMEOUT, UTIL_TIMER_ONESHOT, OnStatusMsgTimeoutEvent, NULL);
+  UTIL_TIMER_Create(&RetryStatusTimer, RETRY_STATUS_TIMEOUT, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kStatusMsgBinding);
   /* USER CODE END LoRaWAN_Init_1 */
 
-  UTIL_TIMER_Create(&JoinRetryTimer, JOIN_RETRY_DELAY, UTIL_TIMER_ONESHOT, OnJoinRetryTimerEvent, NULL);
+  UTIL_TIMER_Create(&JoinRetryTimer, JOIN_RETRY_DELAY, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinRetryBinding);
+  UTIL_TIMER_Create(&JoinTimeoutTimer, JOIN_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinTimeoutBinding);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_JoinTimeoutEvent), UTIL_SEQ_RFU, JoinTimeoutHandler);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LmHandlerProcess), UTIL_SEQ_RFU, LmHandlerProcess);
 
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), UTIL_SEQ_RFU, SendTxData);
@@ -581,15 +677,17 @@ static void OnStatusMessageHandler(void)
 	   *   [1]     type = 0x27 (LORA_RFID_MSG_TYPE_STATUS)
 	   *   [2:3]   batarya gerilimi mV, big endian
 	   *   [4:5]   sicaklik Q8.8 (deger/256.0 = derece C), big endian
-	   *   [6:9]   kacinci status gonderimi (uint32, big endian, her rejoin'de
-	   *           sifirlanir - bkz OnJoinRequest) - sunucu bunu ayni deger
-	   *           olarak time-sync downlink'inde geri gonderiyor, biz de
-	   *           OnRxData'da sadece TAZELIK KONTROLU icin kullaniyoruz
-	   *           (esitse kabul, degilse reddet - aritmetik telafi yok).
-	   *   [10:13] cihazin gonderim anindaki guncel epoch tahmini (GetCurrentUnixTime,
+	   *   [6:9]   kacinci status gonderimi (uint32, big endian) - lora_timesync
+	   *           kutuphanesi tarafindan yonetilir (her rejoin'de sifirlanir,
+	   *           ACK alinamayan bir denemenin retry'i AYNI degeri kullanir).
+	   *           Sunucu bunu ayni deger olarak time-sync downlink'inde geri
+	   *           gonderiyor, biz de OnRxData'da sadece TAZELIK KONTROLU icin
+	   *           kullaniyoruz (esitse kabul, degilse reddet).
+	   *   [10:13] cihazin gonderim anindaki guncel epoch tahmini (LoraTimeSync_GetCurrentUnixTime,
 	   *           sn, big endian)
 	   */
-	  uint32_t statusNowEpoch = GetCurrentUnixTime();
+	  uint32_t statusNowEpoch = LoraTimeSync_GetCurrentUnixTime();
+	  uint32_t statusCounterToSend = LoraTimeSync_GetCounterForStatusSend();
 	  AppData.Port = LORAWAN_USER_APP_PORT;
 	  AppData.Buffer[0] = UplinkCounter++;
 	  AppData.Buffer[1] = LORA_RFID_MSG_TYPE_STATUS;
@@ -597,22 +695,16 @@ static void OnStatusMessageHandler(void)
 	  AppData.Buffer[3] = (uint8_t)(bat_adc_val & 0xFF);
 	  AppData.Buffer[4] = (uint8_t)(((uint16_t)bat_temp_q8_8 >> 8) & 0xFF);
 	  AppData.Buffer[5] = (uint8_t)((uint16_t)bat_temp_q8_8 & 0xFF);
-	  AppData.Buffer[6] = (uint8_t)((g_statusSendCounter >> 24) & 0xFF);
-	  AppData.Buffer[7] = (uint8_t)((g_statusSendCounter >> 16) & 0xFF);
-	  AppData.Buffer[8] = (uint8_t)((g_statusSendCounter >> 8) & 0xFF);
-	  AppData.Buffer[9] = (uint8_t)(g_statusSendCounter & 0xFF);
-	  AppData.Buffer[10] = (uint8_t)((statusNowEpoch >> 24) & 0xFF);
-	  AppData.Buffer[11] = (uint8_t)((statusNowEpoch >> 16) & 0xFF);
-	  AppData.Buffer[12] = (uint8_t)((statusNowEpoch >> 8) & 0xFF);
-	  AppData.Buffer[13] = (uint8_t)(statusNowEpoch & 0xFF);
+	  WriteU32BE(&AppData.Buffer[6], statusCounterToSend);
+	  WriteU32BE(&AppData.Buffer[10], statusNowEpoch);
 	  AppData.BufferSize = 14;
 
 	  status_data_pending_on_lora = true;
 	  LmHandlerErrorStatus_t sendStatus = LmHandlerSend(&AppData, LORAMAC_HANDLER_CONFIRMED_MSG, false);
 	  if (LORAMAC_HANDLER_SUCCESS == sendStatus)
 	  {
-		  g_statusSendCounter++;
-		  APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS SEND REQUEST (bat=%d mV, sayac=%u) - ACK bekleniyor\r\n", bat_adc_val, g_statusSendCounter - 1U);
+		  LoraTimeSync_OnStatusQueued();
+		  APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS SEND REQUEST (bat=%d mV, sayac=%u) - ACK bekleniyor\r\n", bat_adc_val, (unsigned int)statusCounterToSend);
 	  }
 	  else
 	  {
@@ -621,10 +713,6 @@ static void OnStatusMessageHandler(void)
 	  }
 
 
-}
-static void OnStatusMsgTimeoutEvent(void *context)
-{
-	UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_StatusMSGEvent), CFG_SEQ_Prio_status_1);
 }
 
 static void RfidPreventStopMode(void)
@@ -655,30 +743,16 @@ static void OnRfidReadTimeoutEvent(void *context)
   //UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), CFG_SEQ_Prio_0);
 	stop_read_rfid=true;
 }
-static void OnRfidAckTimeoutEvent(void *context)
-{
-	UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_RfidAckTimeoutEvent), CFG_SEQ_Prio_0);
-}
 static void RfidAckTimeoutHandler(void)
 {
 	if (rfid_data_pending_on_lora)
 	{
 		APP_LOG(TS_OFF, VLEVEL_M, "###### RFID ACK timeout - OnTxData gelmedi, veri depoya yaziliyor\r\n");
-		pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid,
-				g_lastSentUidLen, PCB_STATUS_FAILED, &lastRecordId);
-		if (bufferResult == PCB_OK) {
-			pcb_sync(&eventBuffer);
-		} else {
-			USER_LOG("Record add error: %d", bufferResult);
-		}
+		PersistFailedRfidSend();
 		rfid_data_pending_on_lora = false;
 	}
 }
 
-static void OnBufferAckTimeoutEvent(void *context)
-{
-	UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_BufferedAckTimeoutEvent), CFG_SEQ_Prio_0);
-}
 static void BufferAckTimeoutHandler(void)
 {
 	if (buffered_rfid_data_wait_for_ack)
@@ -722,19 +796,16 @@ static void SendBufferedRfidLogHandler(void) {
 		 *   [2:5] 	kaydin timestamp'i (kart okunduğu an), 4 byte big endian
 		 *   [6]   	uid length
 		 *   [7:13]   uid - 7 byte big endian
-		 *   [14:17]  cihazin GONDERIM anindaki guncel epoch tahmini (GetCurrentUnixTime,
+		 *   [14:17]  cihazin GONDERIM anindaki guncel epoch tahmini (LoraTimeSync_GetCurrentUnixTime,
 		 *            sn, big endian) - bu bir RETRY oldugu icin [2:5]'ten farkli
 		 *            olabilir; sunucu tarafinda time-sync tracker icin kullanilabilir.
 		 */
-		uint32_t bufferedNowEpoch = GetCurrentUnixTime();
+		uint32_t bufferedNowEpoch = LoraTimeSync_GetCurrentUnixTime();
 
 		AppData.Port = LORAWAN_USER_APP_PORT;
 		AppData.Buffer[0] = UplinkCounter++;
 		AppData.Buffer[1] = LORA_RFID_MSG_TYPE_LIVE_UID;
-		AppData.Buffer[2] = (uint8_t)(((uint32_t)unsended_record.timestamp>>24)& 0xFF);
-		AppData.Buffer[3] = (uint8_t)(((uint32_t)unsended_record.timestamp>>16)& 0xFF);
-		AppData.Buffer[4] = (uint8_t)(((uint32_t)unsended_record.timestamp>>8)& 0xFF);
-		AppData.Buffer[5] = (uint8_t)(((uint32_t)unsended_record.timestamp)& 0xFF);
+		WriteU32BE(&AppData.Buffer[2], (uint32_t)unsended_record.timestamp);
 
 		AppData.Buffer[6] = unsended_record.uuid_length;
 
@@ -747,10 +818,7 @@ static void SendBufferedRfidLogHandler(void) {
 				AppData.Buffer[7+j] = 0x00;
 			}
 		}
-		AppData.Buffer[14] = (uint8_t)((bufferedNowEpoch >> 24) & 0xFF);
-		AppData.Buffer[15] = (uint8_t)((bufferedNowEpoch >> 16) & 0xFF);
-		AppData.Buffer[16] = (uint8_t)((bufferedNowEpoch >> 8) & 0xFF);
-		AppData.Buffer[17] = (uint8_t)(bufferedNowEpoch & 0xFF);
+		WriteU32BE(&AppData.Buffer[14], bufferedNowEpoch);
 		AppData.BufferSize = 18;
 		UTIL_TIMER_Time_t nextTxIn = 0;
 
@@ -799,7 +867,7 @@ static void SendRFID_Data(void) {
 	if (uuid_val_rfid.is_uuid_data_assigned) {
 		  /* Sunucudan zaman senkronizasyonu henuz gelmediyse 0 doner - eski
 		   * sabit test degeri (1785860967) kaldirildi. */
-		  uint32_t timestamp=GetCurrentUnixTime();
+		  uint32_t timestamp=LoraTimeSync_GetCurrentUnixTime();
 		APP_LOG(TS_OFF, VLEVEL_M, "###### New uuid to send \r\n");
 
 		  g_lastSentTimestamp = timestamp;
@@ -807,8 +875,7 @@ static void SendRFID_Data(void) {
 		  g_lastSentUidLen = uuid_val_rfid.uuid_len;
 
           if (buffered_rfid_data_wait_for_ack || status_data_pending_on_lora) {
-               pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen, PCB_STATUS_FAILED, &lastRecordId);
-               pcb_sync(&eventBuffer);
+               PersistFailedRfidSend();
                return;
            }
 
@@ -819,13 +886,7 @@ static void SendRFID_Data(void) {
 			UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaRejoinEvent),
 					CFG_SEQ_Prio_0);
 
-			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
-			  if (bufferResult == PCB_OK) {
-				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %u, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
-			  } else {
-				  USER_LOG("Record add error: %d", bufferResult);
-			  }
-			  pcb_sync(&eventBuffer);
+			  PersistFailedRfidSend();
 			return;
 		}
 		LmHandlerErrorStatus_t status = LORAMAC_HANDLER_ERROR;
@@ -836,20 +897,17 @@ static void SendRFID_Data(void) {
 		   *   [2:5] 	timestamp 4 byte big endian (kart okundugu an)
 		   *   [6]   	uid length
 		   *   [7:13]   uid - 7 byte  big endian
-		   *   [14:17]  cihazin GONDERIM anindaki guncel epoch tahmini (GetCurrentUnixTime,
+		   *   [14:17]  cihazin GONDERIM anindaki guncel epoch tahmini (LoraTimeSync_GetCurrentUnixTime,
 		   *            sn, big endian) - canli gonderimde [2:5] ile pratikte ayni/yakin
 		   *            olur, ama diger mesaj tiplerinde de ayni sabit konumda bu alan
 		   *            bulunsun diye tutarlilik icin ekleniyor.
 		   */
-		  uint32_t liveNowEpoch = GetCurrentUnixTime();
+		  uint32_t liveNowEpoch = LoraTimeSync_GetCurrentUnixTime();
 
 		  AppData.Port = LORAWAN_USER_APP_PORT;
 		  AppData.Buffer[0] = UplinkCounter++;
 		  AppData.Buffer[1] = LORA_RFID_MSG_TYPE_LIVE_UID;
-		  AppData.Buffer[2] = (uint8_t)(((uint32_t)timestamp>>24)& 0xFF);
-		  AppData.Buffer[3] = (uint8_t)(((uint32_t)timestamp>>16)& 0xFF);
-		  AppData.Buffer[4] = (uint8_t)(((uint32_t)timestamp>>8)& 0xFF);
-		  AppData.Buffer[5] = (uint8_t)(((uint32_t)timestamp)& 0xFF);
+		  WriteU32BE(&AppData.Buffer[2], (uint32_t)timestamp);
 
 		  AppData.Buffer[6] = uuid_val_rfid.uuid_len;
 
@@ -862,10 +920,7 @@ static void SendRFID_Data(void) {
 				  AppData.Buffer[7+i] = 0;
 			  }
 		  }
-		  AppData.Buffer[14] = (uint8_t)((liveNowEpoch >> 24) & 0xFF);
-		  AppData.Buffer[15] = (uint8_t)((liveNowEpoch >> 16) & 0xFF);
-		  AppData.Buffer[16] = (uint8_t)((liveNowEpoch >> 8) & 0xFF);
-		  AppData.Buffer[17] = (uint8_t)(liveNowEpoch & 0xFF);
+		  WriteU32BE(&AppData.Buffer[14], liveNowEpoch);
 		  AppData.BufferSize = 18;
 		  UTIL_TIMER_Time_t nextTxIn = 0;
 
@@ -889,30 +944,21 @@ static void SendRFID_Data(void) {
 		      APP_LOG(TS_ON, VLEVEL_M, "Next Tx in  : ~%d second(s)\r\n", (nextTxIn / 1000));
 		    }
 		    rfid_data_pending_on_lora = false;
-			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
-			  if (bufferResult == PCB_OK) {
-				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %u, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
-			  } else {
-				  USER_LOG("Record add error: %d", bufferResult);
-			  }
-			  pcb_sync(&eventBuffer);
-			  rfid_data_pending_on_lora=false;
+			  PersistFailedRfidSend();
 		  }
 		  else
 		  {
 			  APP_LOG(TS_ON, VLEVEL_M, "SEND FAILED (%d)\r\n", (int)status);
-
-			  pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
-			  if (bufferResult == PCB_OK) {
-				  APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %u, Count: %u",lastRecordId, timestamp,(unsigned int )pcb_count(&eventBuffer));
-			  } else {
-				  USER_LOG("Record add error: %d", bufferResult);
-			  }
-			  pcb_sync(&eventBuffer);
+			  PersistFailedRfidSend();
 			  rfid_data_pending_on_lora=false;
 		  }
 
 	}else{
+		/* Buton basildi ama sure icinde kart okunamadi (timeout). Gonderilecek
+		 * yeni bir kart verisi yok, ama elimizdeki firsati degerlendirip
+		 * buffer'da bekleyen (daha once ACK alamamis) kayit var mi diye
+		 * kontrol edip varsa gonderelim - onceden burada sessizce hicbir
+		 * sey yapilmiyordu. */
 		if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET) {
 			APP_LOG(TS_ON, VLEVEL_M,
 					"Henuz join olunmadi, gonderim yerine rejoin deneniyor\r\n");
@@ -921,11 +967,78 @@ static void SendRFID_Data(void) {
 					CFG_SEQ_Prio_0);
 			return;
 		}
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Kart okunamadi, buffer kontrol ediliyor\r\n");
+		UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_SendBufferedRFIDEvent), CFG_SEQ_Prio_0);
 	}
 }
+
+/* SendRFID_Data() icinde ACK alinamayan bir denemenin, buffer'a dusurulmeden
+ * once RFID_ACK_MAX_RETRY kez tekrar denenmesi icin kullanilir. g_lastSentUid/
+ * g_lastSentUidLen/g_lastSentTimestamp - basarisiz olan denemede zaten
+ * doldurulmus olan onbellek degerleri - AYNEN kullanilir (kart yeniden
+ * okunmaz), sadece [14:17] "gonderim anindaki epoch" alani bu denemenin
+ * gercek zamanina gore tazelenir. */
+static void ResendRfidData(void)
+{
+	if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET) {
+		APP_LOG(TS_OFF, VLEVEL_M, "###### RFID retry: join yok, depoya yaziliyor\r\n");
+		rfid_ack_retry_count = 0;
+		PersistFailedRfidSend();
+		rfid_data_pending_on_lora = false;
+		JoinRetryCount = 0;
+		UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaRejoinEvent), CFG_SEQ_Prio_0);
+		return;
+	}
+
+	uint32_t liveNowEpoch = LoraTimeSync_GetCurrentUnixTime();
+	LmHandlerErrorStatus_t status;
+
+	AppData.Port = LORAWAN_USER_APP_PORT;
+	AppData.Buffer[0] = UplinkCounter++;
+	AppData.Buffer[1] = LORA_RFID_MSG_TYPE_LIVE_UID;
+	WriteU32BE(&AppData.Buffer[2], g_lastSentTimestamp);
+	AppData.Buffer[6] = g_lastSentUidLen;
+	for (int i = 0; i < MAXIMUM_LEN_UUID; i++)
+	{
+		AppData.Buffer[7 + i] = (i < g_lastSentUidLen) ? g_lastSentUid[i] : 0x00;
+	}
+	WriteU32BE(&AppData.Buffer[14], liveNowEpoch);
+	AppData.BufferSize = 18;
+
+	status = LmHandlerSend(&AppData, LmHandlerParams.IsTxConfirmed, false);
+	if (LORAMAC_HANDLER_SUCCESS == status)
+	{
+		APP_LOG(TS_OFF, VLEVEL_M, "###### RFID RETRY GONDERILDI (deneme %u/%u) - ACK bekleniyor\r\n",
+				rfid_ack_retry_count, RFID_ACK_MAX_RETRY);
+		rfid_data_pending_on_lora = true;
+		UTIL_TIMER_Start(&RfidAckTimeoutTimer);
+	}
+	else
+	{
+		/* Kuyruga bile alinamadi (MAC busy/duty-cycle/vs) - bu denemeyi
+		 * kaybetmis sayip dogrudan depoya yaz, kalan retry haklarini
+		 * bosa harcama. */
+		APP_LOG(TS_OFF, VLEVEL_M, "###### RFID RETRY GONDERILEMEDI (%d), depoya yaziliyor\r\n", (int)status);
+		rfid_ack_retry_count = 0;
+
+		PersistFailedRfidSend();
+		rfid_data_pending_on_lora = false;
+	}
+}
+
 static void ReadRFIDCard(void) {
 	if (rfid_data_pending_on_lora) {
 		APP_LOG(TS_OFF, VLEVEL_M, "###### Onceki RFID gonderimi hala ACK bekliyor, yeni okuma reddedildi\r\n");
+		return;
+	}
+	if (join_in_progress) {
+		/* Aktif bir join surerken RFID okumasi baslatmiyoruz - okuma ~5-6 sn
+		 * bloklayan bir dongu (HAL_Delay tabanli) ve sequencer'i mesgul ederek
+		 * tam da join-accept RX1/RX2 pencerelerinin islenmesini geciktirebilir
+		 * (gozlemlenmis gercek bir ariza senaryosu). Join bitince (basarili/
+		 * basarisiz, ya da timeout guard'i devreye girince) buton tekrar
+		 * calisir hale gelir. */
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Join surüyor, RFID okumasi ertelendi\r\n");
 		return;
 	}
 	awake_led_gpio_init();
@@ -1008,13 +1121,22 @@ static void TryJoin(void)
 
   LmHandlerConfigure(&LmHandlerParams);
   LmHandlerJoin(ActivationType, true);   /* ActivationType  */
-
+  UTIL_TIMER_Start(&JoinTimeoutTimer);
 
 }
 
-static void OnJoinRetryTimerEvent(void *context)
+static void JoinTimeoutHandler(void)
 {
-  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaRejoinEvent), CFG_SEQ_Prio_0);
+  /* OnJoinRequest() beklenen surede (JOIN_TIMEOUT_MS) gelmediyse join_in_progress
+   * kalici olarak takili kalir ve TryJoin() bir daha asla calismaz - bu, cihazin
+   * kalici olarak rejoin yapamaz hale gelmesine yol acan gercek bir ariza senaryosuydu.
+   * Guvenlik supabi: bayragi zorla temizleyip cihazi kurtariyoruz, bir sonraki
+   * rejoin denemesi (status/RFID/timer tetikli) normal sekilde calisabilir. */
+  if (join_in_progress)
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "###### JOIN TIMEOUT - OnJoinRequest gelmedi, guard zorla temizleniyor\r\n");
+    join_in_progress = false;
+  }
 }
 /* USER CODE END PrFD */
 
@@ -1029,48 +1151,18 @@ static void OnRxData(LmHandlerAppData_t *appData, LmHandlerRxParams_t *params)
 	    if ((appData->BufferSize > 0) && (appData->Buffer != NULL))
 	    {
 	    	APP_LOG(TS_OFF, VLEVEL_M, "###### D/L mesaj tipi: 0x%02X, cihazin bildigi guncel epoch: %u\r\n",
-	    			appData->Buffer[0], (unsigned int)GetCurrentUnixTime());
+	    			appData->Buffer[0], (unsigned int)LoraTimeSync_GetCurrentUnixTime());
 	    }
 
-	    /* Sunucudan zaman senkronizasyonu: [0]=tip, [1:4]=Unix epoch (sn, big-endian),
-	     * [5:8]=sunucunun bu yaniti hesapladigi andaki status sayaci (uint32,
-	     * big-endian, bkz g_statusSendCounter).
-	     *
-	     * TAZELIK KONTROLU (aritmetik telafi YOK): yanittaki sayac, bizim EN SON
-	     * gonderdigimiz status'un sayaciyla (g_statusSendCounter - 1) birebir
-	     * ESITSE bu yanit taze demektir, epoch dogrudan kabul edilir. Esit
-	     * degilse (stale/gecikmis bir yanitsa, veya baska bir sebeple sayac
-	     * tutmuyorsa) yanit sessizce reddedilir - bozuk/eski bir epoch'u
-	     * kabul edip cihaz saatini yanlislikla kaydirmaktansa, bir sonraki
-	     * status turunde round-trip yetisip taze bir yanit gelmesini bekleriz. */
-	    if ((appData->Port == LORAWAN_USER_APP_PORT) &&
-	        (appData->BufferSize == 9) && (appData->Buffer != NULL) &&
-	        (appData->Buffer[0] == LORA_DOWNLINK_MSG_TYPE_TIME_SYNC))
+	    /* Zaman senkronizasyon mesajinin parse/tazelik-kontrolu/uygulanmasi
+	     * artik lora_timesync kutuphanesinde - burada sadece fPort filtresi
+	     * yapip sonucu cagiriyoruz. */
+	    if (appData->Port == LORAWAN_USER_APP_PORT)
 	    {
-	    	uint32_t receivedEpoch = ((uint32_t)appData->Buffer[1] << 24) |
-	    			((uint32_t)appData->Buffer[2] << 16) |
-	    			((uint32_t)appData->Buffer[3] << 8) |
-	    			((uint32_t)appData->Buffer[4]);
-	    	uint32_t receivedStatusCount = ((uint32_t)appData->Buffer[5] << 24) |
-	    			((uint32_t)appData->Buffer[6] << 16) |
-	    			((uint32_t)appData->Buffer[7] << 8) |
-	    			((uint32_t)appData->Buffer[8]);
-	    	uint32_t currentStatusCount = (g_statusSendCounter > 0U) ? (g_statusSendCounter - 1U) : 0U;
-
-	    	if (receivedStatusCount == currentStatusCount)
+	    	if (LoraTimeSync_HandleDownlink(appData->Buffer, (uint8_t)appData->BufferSize))
 	    	{
-	    		g_deviceUnixEpoch = receivedEpoch;
-	    		g_deviceEpochSetAtMs = UTIL_TIMER_GetCurrentTime();
-	    		g_deviceTimeIsSynced = true;
-
-	    		APP_LOG(TS_OFF, VLEVEL_M, "###### TIME SYNC alindi: epoch=%u, sayac=%u\r\n",
-	    				(unsigned int)receivedEpoch, (unsigned int)receivedStatusCount);
-	    	}
-	    	else
-	    	{
-	    		APP_LOG(TS_OFF, VLEVEL_M,
-	    				"###### TIME SYNC reddedildi (stale): yanit_sayac=%u, mevcut_sayac=%u\r\n",
-	    				(unsigned int)receivedStatusCount, (unsigned int)currentStatusCount);
+	    		APP_LOG(TS_OFF, VLEVEL_M, "###### TIME SYNC alindi: epoch=%u\r\n",
+	    				(unsigned int)LoraTimeSync_GetCurrentUnixTime());
 	    	}
 	    }
 	  }
@@ -1155,7 +1247,19 @@ static void OnTxData(LmHandlerTxParams_t *params)
 	LmHandlerGetTxDatarate(&data_rate);
 	APP_LOG(TS_OFF, VLEVEL_M, "Tx Data Rate: %d\r\n",data_rate);
 
-	if ((params != NULL) && (params->MsgType == LORAMAC_HANDLER_CONFIRMED_MSG))
+	/* KRITIK: MlmeConfirm() (LmHandler.c) bu callback'i join/link-check gibi
+	 * MLME confirm'leri icin de cagiriyor, ama TxParams.MsgType/AckReceived/
+	 * UplinkCounter alanlarina DOKUNMUYOR - yani join basarisiz oldugunda bu
+	 * alanlar en son gercek veri mesajindan (McpsConfirm) kalma BAYAT degerleri
+	 * tasiyor. IsMcpsConfirm==0 olan (yani MLME/join kaynakli) cagrilari burada
+	 * eleyip yalnizca gercek veri mesaji confirm'lerini (IsMcpsConfirm==1)
+	 * isliyoruz - aksi halde her join hatasi, son gonderilen veri mesaji
+	 * confirmed'sa "CONFIRMED TX BASARISIZ" sanilip un_successfull_ack_response
+	 * sayacini artiriyor ve esik asilinca JoinRetryCount'u sifirlayip
+	 * JOIN_RETRY_MAX'in "3 deneme sonra dur" mantigini bozuyordu (gozlemlenen
+	 * gercek bir ariza - log'larda ayni "uplink #N" sayaciyla onlarca kez
+	 * tekrar eden sahte ACK hatasi olarak goruldu). */
+	if ((params != NULL) && (params->IsMcpsConfirm != 0) && (params->MsgType == LORAMAC_HANDLER_CONFIRMED_MSG))
 	{
 		if (params->AckReceived == 0)
 		{
@@ -1166,25 +1270,34 @@ static void OnTxData(LmHandlerTxParams_t *params)
 
 			if (status_data_pending_on_lora)
 			{
-				APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS (batarya) ACK ALINAMADI (uplink #%d)\r\n",
-						(int)params->UplinkCounter);
+				APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS (batarya) ACK ALINAMADI (uplink #%d), %u sn sonra AYNI sayacla tekrar denenecek\r\n",
+						(int)params->UplinkCounter, (unsigned int)(RETRY_STATUS_TIMEOUT / 1000U));
 				status_data_pending_on_lora = false;
+				LoraTimeSync_OnStatusAckResult(false);
 				UTIL_TIMER_Start(&RetryStatusTimer);
 			}
 
 			if(rfid_data_pending_on_lora)
 			{
 				UTIL_TIMER_Stop(&RfidAckTimeoutTimer);
-				APP_LOG(TS_OFF, VLEVEL_M, "###### RFID ACK ALINAMADI, depoya yaziliyor\r\n");
-
-				pcb_result_t bufferResult = pcb_add(&eventBuffer, g_lastSentTimestamp, g_lastSentUid, g_lastSentUidLen,PCB_STATUS_FAILED, &lastRecordId);
-				if (bufferResult == PCB_OK) {
-					APP_LOG(TS_ON, VLEVEL_M,"Record added to RAM. ID: %u, Time: %u, Count: %u",lastRecordId, g_lastSentTimestamp,(unsigned int )pcb_count(&eventBuffer));
-				} else {
-					USER_LOG("Record add error: %d", bufferResult);
+				if (rfid_ack_retry_count < RFID_ACK_MAX_RETRY)
+				{
+					rfid_ack_retry_count++;
+					APP_LOG(TS_OFF, VLEVEL_M, "###### RFID ACK ALINAMADI, %u sn sonra AYNI icerikle tekrar denenecek (deneme %u/%u)\r\n",
+							(unsigned int)(RFID_ACK_RETRY_DELAY_MS / 1000U), rfid_ack_retry_count, RFID_ACK_MAX_RETRY);
+					/* rfid_data_pending_on_lora KASITLI true birakiliyor - yeni RFID
+					 * okumasi veya status gonderimi retry'lar bitene kadar ertelensin. */
+					UTIL_TIMER_Start(&RfidAckRetryTimer);
 				}
-				pcb_sync(&eventBuffer);
-				rfid_data_pending_on_lora=false;
+				else
+				{
+					APP_LOG(TS_OFF, VLEVEL_M, "###### RFID ACK ALINAMADI (%u/%u deneme tukendi), depoya yaziliyor\r\n",
+							rfid_ack_retry_count, RFID_ACK_MAX_RETRY);
+					rfid_ack_retry_count = 0;
+
+					PersistFailedRfidSend();
+					rfid_data_pending_on_lora=false;
+				}
 			}
 
 			if(buffered_rfid_data_wait_for_ack)
@@ -1233,8 +1346,11 @@ static void OnTxData(LmHandlerTxParams_t *params)
 				}
 				if((set_ended_id_result==PCB_OK)&&(pcb_sync_result==PCB_OK))
 				{
-					UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_SendBufferedRFIDEvent),
-							CFG_SEQ_Prio_0);
+					/* Bir sonraki buffer kaydini hemen degil, BUFFERED_DRAIN_DELAY_MS
+					 * (10 sn) sonra gonder - ard arda (aralarinda ~1 sn'den az)
+					 * gonderimin ACK sorunlarina katkisi olup olmadigini ayirt
+					 * etmek icin araya konan bilincli bekleme. */
+					UTIL_TIMER_Start(&BufferedDrainDelayTimer);
 				}else{
 					APP_LOG(TS_OFF, VLEVEL_M, "###### FLASH SENKTON HATASI!!!! Huston We a Problem \r\n");
 				}
@@ -1244,14 +1360,15 @@ static void OnTxData(LmHandlerTxParams_t *params)
 				APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS (batarya) ACK ALINDI (uplink #%d)\r\n",
 						(int)params->UplinkCounter);
 				status_data_pending_on_lora = false;
-				UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_SendBufferedRFIDEvent), CFG_SEQ_Prio_0);
+				LoraTimeSync_OnStatusAckResult(true);
+				UTIL_TIMER_Start(&BufferedDrainDelayTimer);
 			}
 
 			if (rfid_data_pending_on_lora) {
 				UTIL_TIMER_Stop(&RfidAckTimeoutTimer);
+				rfid_ack_retry_count = 0;
 				//Buffer send task tetiklenecek
-				UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_SendBufferedRFIDEvent),
-						CFG_SEQ_Prio_0);
+				UTIL_TIMER_Start(&BufferedDrainDelayTimer);
 			}
 			rfid_data_pending_on_lora=false;
 		}
@@ -1262,12 +1379,14 @@ static void OnJoinRequest(LmHandlerJoinParams_t *joinParams) {
 	/* USER CODE BEGIN OnJoinRequest_1 */
 	if (joinParams != NULL) {
 		join_in_progress = false;
+		UTIL_TIMER_Stop(&JoinTimeoutTimer);
 		if (joinParams->Status == LORAMAC_HANDLER_SUCCESS) {
 			JoinRetryCount = 0;
 			/* Sunucu join event'inde time-sync downlink'ini HER ZAMAN
 			 * status_count=0 varsayimiyla gonderiyor - bu varsayimin
 			 * gecerli kalmasi icin sayaci burada sifirliyoruz. */
-			g_statusSendCounter = 0;
+			LoraTimeSync_OnJoined();
+			rfid_ack_retry_count = 0;
 			APP_LOG(TS_OFF, VLEVEL_M, "\r\n###### = JOINED = %s ======\r\n",
 					(joinParams->Mode == ACTIVATION_TYPE_ABP) ? "ABP " : "OTAA");
 			UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_StatusMSGEvent), CFG_SEQ_Prio_status_1);

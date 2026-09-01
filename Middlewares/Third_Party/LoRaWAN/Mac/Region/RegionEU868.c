@@ -194,6 +194,11 @@ PhyParam_t RegionEU868GetPhyParam( GetPhyParams_t* getPhy )
         }
         case PHY_RECEIVE_DELAY1:
         {
+            /* RX gecikmesini spec varsayilanina geri aldik (deney basarisiz -
+             * UG63 sunucusu bu degisikligi bilmedigi icin ACK'ler duzelmedi,
+             * aksine bozulma riski dogurdu). Time-sync gecikme sorunu
+             * OnRxData'daki tazelik kontroluyle (bkz g_statusSendCounter)
+             * ayrica ele aliniyor. */
             phyParam.Value = REGION_COMMON_DEFAULT_RECEIVE_DELAY1;
             break;
         }

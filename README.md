@@ -1,0 +1,99 @@
+# LW RFID Base End Node
+
+STM32WL tabanlı, RFID kart okuyup LoRaWAN üzerinden sunucuya ileten, düşük güç tüketimli ve **offline dayanıklı** bir uç düğüm (end node) firmware'i. Kart okunduğunda ACK alınamazsa (join yok, duty-cycle, ağ kapalı vb.) kayıt flash'a yazılır ve ağ tekrar erişilebilir olduğunda otomatik olarak boşaltılır — manuel reset gerekmez.
+
+## Donanım
+
+- **MCU:** STM32WLE5JCIx (Cortex-M4 + entegre SubGHz radyo)
+- **RFID okuyucu:** MFRC522 (SPI2), GPIO ile anahtarlanabilir güç hattı üzerinden
+- **Bölge/Profil:** EU868, LoRaWAN Class A, **OTAA** (`LoRaWAN/App/lora_app.h`)
+- **Uygulama portu:** `LORAWAN_USER_APP_PORT = 2`
+
+## Mimari
+
+Klasik CubeMX iskeleti + kooperatif, run-to-completion bir sequencer (`Utilities/sequencer`, `UTIL_SEQ_*`) üzerine kurulu — RTOS yok. `main.c`'deki tek süperdöngü `MX_LoRaWAN_Process()` üzerinden sequencer'ı sürüyor; sequencer boşta kaldığında düşük güç yöneticisi (`Utilities/lpm`, `Core/Src/stm32_lpm_if.c`) cihazı **Stop2** moduna sokuyor.
+
+Uygulama mantığının tamamı `LoRaWAN/App/lora_app.c`'de: RFID okuma tetikleyicisi (buton/GPIO wake-up), LoRaWAN gönderim/ACK/retry zincirleri, saatlik durum (STATUS) mesajı, otomatik rejoin.
+
+CubeMX'in dokunmadığı, projeye özel her şey **`external_libs/`** altında kendi `Inc/`+`Src/` klasörleriyle tutulur — bu sayede CubeMX ile kod yeniden üretimi (regenerate) bu modülleri asla etkilemez:
+
+| Modül | Görev |
+|---|---|
+| `MFRC522/` | MFRC522 RFID okuyucu sürücüsü (SPI, register erişimi, anticollision) |
+| `Wake_Up_Button/` | Buton ile uyandırma GPIO/EXTI kurulumu |
+| `adc_bat_meas/` | Pil voltajı ve sıcaklık ölçümü (dahili ADC) |
+| `persistent_circular_buffer/` | Flash destekli dairesel arabellek — ACK alınamayan RFID kayıtlarını saklar, bkz. `README_TR.md` içinde |
+| `lora_app_auxilary/` | `lora_timesync` — sunucudan gelen zaman senkron downlink'ini işleyip cihaz saatini yöneten bağımsız kütüphane |
+| `watchdog/` | `app_watchdog` — IWDG (bağımsız donanım watchdog) sarmalayıcısı |
+
+## LoRaWAN Payload Formatları
+
+Tüm mesajlar `LORAWAN_USER_APP_PORT` (2) üzerinden, `Buffer[0]` = uplink counter, `Buffer[1]` = mesaj tipi ile başlar. Çok baytlı sayısal alanlar **big-endian**.
+
+**Canlı RFID okuma** (`LORA_RFID_MSG_TYPE_LIVE_UID = 0x45`, 18 byte) ve **buffer'dan tekrar gönderim** — aynı format:
+| Byte | Alan |
+|---|---|
+| 0 | uplink counter |
+| 1 | tip (0x45) |
+| 2:5 | kart okunduğu andaki timestamp (Unix epoch, sn) |
+| 6 | UID uzunluğu |
+| 7:13 | UID (7 byte, kullanılmayan baytlar 0x00) |
+| 14:17 | gönderim anındaki güncel epoch tahmini (retry'lerde [2:5]'ten farklı olabilir) |
+
+**Durum (STATUS) mesajı** (`LORA_RFID_MSG_TYPE_STATUS = 0x27`, 14 byte, saatlik + retry):
+| Byte | Alan |
+|---|---|
+| 0 | uplink counter |
+| 1 | tip (0x27) |
+| 2:3 | pil ADC değeri (mV) |
+| 4:5 | sıcaklık (Q8.8) |
+| 6:9 | status sayacı — sunucunun zaman senkron yanıtında **aynen** geri göndermesi gereken tazelik anahtarı |
+| 10:13 | gönderim anındaki güncel epoch tahmini |
+
+**Zaman senkron downlink'i** (sunucudan cihaza, `LORA_TIMESYNC_DOWNLINK_TYPE = 0x01`, 9 byte — bkz. `external_libs/lora_app_auxilary/Inc/lora_timesync.h`):
+| Byte | Alan |
+|---|---|
+| 0 | tip (0x01) |
+| 1:4 | Unix epoch (sn) |
+| 5:8 | sunucunun bu yanıtı hesapladığı andaki status sayacı |
+
+Cihaz, gelen sayacı kendi son gönderdiği status sayacıyla **birebir eşleşmiyorsa** yanıtı sessizce reddeder (gecikmiş/stale downlink koruması) — bkz. `lora_timesync.c`.
+
+## Güç Yönetimi ve Watchdog
+
+Cihaz çoğu zamanını Stop2 modunda geçirir; RFID okuma (~5-6 sn, timer ile sınırlı) ve status hazırlığı (ADC okuma, çok kısa) dışında Stop modu kilitlenmez.
+
+**IWDG (bağımsız watchdog)** `external_libs/watchdog/` üzerinden elle bağlandı — CubeMX `.ioc`'ta hiç etkinleştirilmedi, bilinçli bir tercih (regenerate tetiklenmesin diye):
+- Tek refresh noktası: `Core/Src/stm32_lpm_if.c` → `PWR_EnterStopMode()`, her Stop2 girişinde.
+- Zaman aşımı: ~26 sn (LSI /256 prescaler, reload 3249) — en uzun bloklu pencereden (~5-6 sn) rahat marjlı.
+- Mantık: bir görev (örn. MFRC522 ile SPI iletişimi `HAL_MAX_DELAY` kullandığı için gerçekten sonsuza kadar takılabilir) sequencer'ı bloke edip cihazın bir daha Stop moduna dönmesini engellerse, refresh de durur ve ~26 sn içinde donanımsal reset devreye girer.
+- `Core/Src/main.c`'deki `Error_Handler()`'a **bilerek** refresh eklenmedi — kurtarılamaz bir hata artık sessizce sonsuza dek asılı kalmak yerine IWDG tarafından yakalanıp resetlenir.
+- **Kırılganlık notu:** CubeMX `.ioc` üzerinden "Generate Code" çalıştırılırsa (IWDG orada kapalı göründüğü için) `Core/Inc/stm32wlxx_hal_conf.h`'deki `HAL_IWDG_MODULE_ENABLED` satırı tekrar yorum satırına dönüp build'i kırabilir — regenerate edilecekse önce IWDG'yi `.ioc`'ta da işaretlemek gerekir.
+
+## Zaman Senkronizasyonu
+
+Cihaz saati, STM32CubeWL'in `SysTimeSet()`/`SysTimeGet()` (RTC yedek registerları, `RTC_BKP_DR0/DR1`) altyapısına dayanır — bu registerlar **watchdog/yazılımsal reset'lerde silinmez**, sadece gerçek güç kaybında sıfırlanır. Ayrıca "gerçekten en az bir kez senkron olundu mu" bilgisini ayrı bir yedek register'da (`RTC_BKP_DR3`, `lora_timesync.c`) tutar. Detay için `external_libs/lora_app_auxilary/Inc/lora_timesync.h`'deki kullanım sırası yorumuna bakın.
+
+## Kalıcı Buffer / Offline Dayanıklılık
+
+ACK alınamayan her RFID kaydı `PersistFailedRfidSend()` (`lora_app.c`) üzerinden `persistent_circular_buffer`'a (flash) yazılır. Ağ tekrar erişilebilir olduğunda (bir sonraki başarılı ACK, ya da rejoin) buffer en yeniden en eskiye doğru (LIFO) otomatik boşaltılır. Detaylar ve senaryo bazlı testler için `docs/test-plan-lora_app.md` bölüm A-D, K.
+
+> **Bilinen davranış (bug değil):** Uygulama kodu sektörünü silmeden yeniden flaşlamak buffer'ı korur; **tam chip erase** (ör. reflash sırasında) PCB'nin sakladığı sayfaları da siler, bu yüzden `pcb_count()` reset sonrası 0 görünür — bu beklenen bir durumdur.
+
+## Derleme
+
+STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her modül `.cproject`'e elle eklenmiş include-path + source-path girdileriyle derlemeye dahil edilir (CubeMX'in bilmediği, dokunmadığı dosyalar). Yeni bir `external_libs/<modül>` eklerken aynı iki satırlık `.cproject` düzenlemesi (include path + sourcePath) gerekir — mevcut girişler örnek alınabilir.
+
+## Dokümanlar
+
+- `docs/test-plan-lora_app.md` — senaryo bazlı test planı (buffer, RFID/status ACK zincirleri, rejoin, LPM, zaman senkronu, refactor regresyonu)
+- `docs/lorawan-devicetimereq-reference.md` — LoRaWAN DeviceTimeReq referansı
+- `docs/milesight-ug63-lorawan-version-mismatch.md` — Milesight UG63 network server ile gözlemlenen LoRaWAN sürüm uyuşmazlığı (üretici cevabı bekleniyor)
+- `external_libs/persistent_circular_buffer/README_TR.md` — kalıcı buffer'ın kendi detaylı dokümantasyonu
+
+## Bilinen Açık Konular
+
+- **Flash senkron sırasında RX penceresi stall riski** — STM32WLE5 tek banklı flash (`stm32wlxx_hal_flash.h`: `FLASH_EraseInitTypeDef`'te bank alanı yok, 128×2KB düz sayfa uzayı, `FLASH_TIMEOUT_VALUE=1000` ms), yani bir sayfa erase/program sırasında CPU — interrupt dahil — tamamen duruyor. Mimari risk gerçek ve kalıcı, ama güncel koddaki karşılıklı dışlama bayrakları (`rfid_data_pending_on_lora`, `buffered_rfid_data_wait_for_ack`, `status_data_pending_on_lora`) aynı anda yalnızca tek bir confirmed uplink'e izin verdiği için, gözlemlenebilir bir tetikleyici yolu şu an kapalı görünüyor. Yoğun trafik altında istatistiksel doğrulama (ACK başarı oranı) yine de faydalı olur, ama düşük olasılıklı bir risk olarak değerlendirilmeli — bkz. `docs/test-plan-lora_app.md` bölüm I.
+- LoRaWAN sürüm uyuşmazlığı (Milesight UG63) — üretici cevabı bekleniyor, bkz. `docs/milesight-ug63-lorawan-version-mismatch.md`.
+
+

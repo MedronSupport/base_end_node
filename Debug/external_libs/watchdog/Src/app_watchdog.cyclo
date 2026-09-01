@@ -1,0 +1,2 @@
+../external_libs/watchdog/Src/app_watchdog.c:22:6:AppWatchdog_Init	1
+../external_libs/watchdog/Src/app_watchdog.c:36:6:AppWatchdog_Refresh	1
