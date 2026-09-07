@@ -43,7 +43,11 @@ external_libs/watchdog/Src/app_watchdog.o: \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_spi.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart_ex.h \
- ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h
+ ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h \
+ ../Utilities/sequencer/stm32_seq.h ../Utilities/timer/stm32_timer.h \
+ ../Drivers/CMSIS/Include/cmsis_compiler.h ../Core/Inc/utilities_conf.h \
+ ../Utilities/misc/stm32_mem.h ../Utilities/misc/stm32_tiny_vsnprintf.h \
+ ../Core/Inc/utilities_def.h ../Core/Inc/utilities_def.h
 C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/watchdog/Inc/app_watchdog.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal.h:
 ../Core/Inc/stm32wlxx_hal_conf.h:
@@ -88,3 +92,11 @@ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/watchdog/Inc/app_watc
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart_ex.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h:
+../Utilities/sequencer/stm32_seq.h:
+../Utilities/timer/stm32_timer.h:
+../Drivers/CMSIS/Include/cmsis_compiler.h:
+../Core/Inc/utilities_conf.h:
+../Utilities/misc/stm32_mem.h:
+../Utilities/misc/stm32_tiny_vsnprintf.h:
+../Core/Inc/utilities_def.h:
+../Core/Inc/utilities_def.h:

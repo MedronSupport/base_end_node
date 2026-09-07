@@ -125,7 +125,7 @@ void PWR_ExitStopMode(void)
   /* Resume not retained USARTx and DMA */
   vcom_Resume();
   /* USER CODE BEGIN ExitStopMode_2 */
-  APP_LOG(TS_OFF, VLEVEL_M, "STOP2'den uyanildi (toplam giris: %u)\r\n", (unsigned int)g_stopModeEntryCount);
+  //APP_LOG(TS_OFF, VLEVEL_M, "STOP2'den uyanildi (toplam giris: %u)\r\n", (unsigned int)g_stopModeEntryCount);
   /* USER CODE END ExitStopMode_2 */
 }
 

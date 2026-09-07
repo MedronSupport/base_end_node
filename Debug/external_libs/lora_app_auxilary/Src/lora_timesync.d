@@ -1,7 +1,11 @@
 external_libs/lora_app_auxilary/Src/lora_timesync.o: \
  ../external_libs/lora_app_auxilary/Src/lora_timesync.c \
  C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/lora_app_auxilary/Inc/lora_timesync.h \
- ../Utilities/misc/stm32_systime.h ../Core/Inc/rtc.h ../Core/Inc/main.h \
+ ../Utilities/misc/stm32_systime.h ../Utilities/timer/stm32_timer.h \
+ ../Drivers/CMSIS/Include/cmsis_compiler.h \
+ ../Drivers/CMSIS/Include/cmsis_gcc.h ../Core/Inc/utilities_conf.h \
+ ../Utilities/misc/stm32_mem.h ../Utilities/misc/stm32_tiny_vsnprintf.h \
+ ../Core/Inc/utilities_def.h ../Core/Inc/rtc.h ../Core/Inc/main.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal.h \
  ../Core/Inc/stm32wlxx_hal_conf.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_dma.h \
@@ -11,7 +15,6 @@ external_libs/lora_app_auxilary/Src/lora_timesync.o: \
  ../Drivers/CMSIS/Include/core_cm4.h \
  ../Drivers/CMSIS/Include/cmsis_version.h \
  ../Drivers/CMSIS/Include/cmsis_compiler.h \
- ../Drivers/CMSIS/Include/cmsis_gcc.h \
  ../Drivers/CMSIS/Include/mpu_armv7.h \
  ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/system_stm32wlxx.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/Legacy/stm32_hal_legacy.h \
@@ -47,6 +50,13 @@ external_libs/lora_app_auxilary/Src/lora_timesync.o: \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h
 C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/lora_app_auxilary/Inc/lora_timesync.h:
 ../Utilities/misc/stm32_systime.h:
+../Utilities/timer/stm32_timer.h:
+../Drivers/CMSIS/Include/cmsis_compiler.h:
+../Drivers/CMSIS/Include/cmsis_gcc.h:
+../Core/Inc/utilities_conf.h:
+../Utilities/misc/stm32_mem.h:
+../Utilities/misc/stm32_tiny_vsnprintf.h:
+../Core/Inc/utilities_def.h:
 ../Core/Inc/rtc.h:
 ../Core/Inc/main.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal.h:
@@ -58,7 +68,6 @@ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/lora_app_auxilary/Inc
 ../Drivers/CMSIS/Include/core_cm4.h:
 ../Drivers/CMSIS/Include/cmsis_version.h:
 ../Drivers/CMSIS/Include/cmsis_compiler.h:
-../Drivers/CMSIS/Include/cmsis_gcc.h:
 ../Drivers/CMSIS/Include/mpu_armv7.h:
 ../Drivers/CMSIS/Device/ST/STM32WLxx/Include/system_stm32wlxx.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/Legacy/stm32_hal_legacy.h:

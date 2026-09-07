@@ -64,9 +64,9 @@ Cihaz, gelen sayacı kendi son gönderdiği status sayacıyla **birebir eşleşm
 Cihaz çoğu zamanını Stop2 modunda geçirir; RFID okuma (~5-6 sn, timer ile sınırlı) ve status hazırlığı (ADC okuma, çok kısa) dışında Stop modu kilitlenmez.
 
 **IWDG (bağımsız watchdog)** `external_libs/watchdog/` üzerinden elle bağlandı — CubeMX `.ioc`'ta hiç etkinleştirilmedi, bilinçli bir tercih (regenerate tetiklenmesin diye):
-- Tek refresh noktası: `Core/Src/stm32_lpm_if.c` → `PWR_EnterStopMode()`, her Stop2 girişinde.
-- Zaman aşımı: ~26 sn (LSI /256 prescaler, reload 3249) — en uzun bloklu pencereden (~5-6 sn) rahat marjlı.
-- Mantık: bir görev (örn. MFRC522 ile SPI iletişimi `HAL_MAX_DELAY` kullandığı için gerçekten sonsuza kadar takılabilir) sequencer'ı bloke edip cihazın bir daha Stop moduna dönmesini engellerse, refresh de durur ve ~26 sn içinde donanımsal reset devreye girer.
+- Zaman aşımı: ~30 sn (LSI /256 prescaler, reload 3749) — donanım tavanına (~32,768 sn) ~2,77 sn pay bırakır.
+- **İki refresh noktası:** (1) `Core/Src/stm32_lpm_if.c` → `PWR_EnterStopMode()`, her Stop2 girişinde; (2) `external_libs/watchdog/`'un kendi kurduğu **bağımsız periyodik "kick" görevi** (~20 sn, `CFG_SEQ_Task_WatchdogKickEvent` — enerji tasarrufu için zaman aşımının ~2/3'ü kadar seyrek tutuluyor). İkincisi zorunlu: IWDG, Stop2 uykusu sırasında da (LSI'ye bağlı olduğu için) saymaya devam eder — cihaz bir sonraki olaya kadar (ör. periyodik status turu) zaman aşımından uzun kesintisiz uyursa, sadece Stop2-girişi refresh'i bir daha hiç çağrılmaz ve IWDG cihazı **gerçek bir donma olmadan** resetler (sahada gözlemlenen, düzeltilen gerçek bir bug — `SendBufferedRfidLogHandler`'ın ardından ~26 sn'de tekrarlayan reboot).
+- Periyodik kick görevi gerçek bir donmayı (ör. MFRC522 SPI'da `HAL_MAX_DELAY` ile kilitlenme) yakalama özelliğini bozmaz: RTC ISR'i sadece bir sequencer görevi bayrağı koyar, asıl `HAL_IWDG_Refresh()` çağrısı ancak sequencer bu görevi gerçekten çalıştırabilirse olur — donmuş bir sequencer bu görevi hiç çalıştıramaz, IWDG yine de resetler.
 - `Core/Src/main.c`'deki `Error_Handler()`'a **bilerek** refresh eklenmedi — kurtarılamaz bir hata artık sessizce sonsuza dek asılı kalmak yerine IWDG tarafından yakalanıp resetlenir.
 - **Kırılganlık notu:** CubeMX `.ioc` üzerinden "Generate Code" çalıştırılırsa (IWDG orada kapalı göründüğü için) `Core/Inc/stm32wlxx_hal_conf.h`'deki `HAL_IWDG_MODULE_ENABLED` satırı tekrar yorum satırına dönüp build'i kırabilir — regenerate edilecekse önce IWDG'yi `.ioc`'ta da işaretlemek gerekir.
 

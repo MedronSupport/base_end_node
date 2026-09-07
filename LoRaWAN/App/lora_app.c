@@ -336,7 +336,7 @@ static UTIL_TIMER_Object_t RfidReadTimeoutTimer;
 static UTIL_TIMER_Object_t StatusMessageTimeoutTimer;
 static UTIL_TIMER_Object_t RetryStatusTimer;
 static UTIL_TIMER_Time_t RFID_TIMEOUT = MFRC_RFID_READ_TIMEOUT;
-static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 60000;
+static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 3600000;
 static UTIL_TIMER_Time_t RETRY_STATUS_TIMEOUT= 15000;
 /* Buffer'dan bir kayit gonderilip ACK alindiktan sonra, bir sonraki kaydin
  * gonderilmesinden once beklenecek sure. Onceden ACK gelir gelmez hemen bir
@@ -591,12 +591,12 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
 
 		currentTick = HAL_GetTick();
 
-		/* Son geçerli kesmeden sonra 50 ms geçmediyse yok say */
+
 		if ((uint32_t) (currentTick - lastButtonTick) < WAKE_UP_BUTTON_DEBOUNCE_MS) {
 			return;
 		}
 
-		/* Falling-edge sonrası buton gerçekten LOW mu kontrol et */
+
 		if (HAL_GPIO_ReadPin(WakeUpButtonPort, WakeUpButtonPin)
 				!= GPIO_PIN_RESET) {
 			return;
@@ -865,8 +865,7 @@ static void SendBufferedRfidLogHandler(void) {
 static void SendRFID_Data(void) {
 	APP_LOG(TS_OFF, VLEVEL_M, "###### Send RFID has triggered... \r\n");
 	if (uuid_val_rfid.is_uuid_data_assigned) {
-		  /* Sunucudan zaman senkronizasyonu henuz gelmediyse 0 doner - eski
-		   * sabit test degeri (1785860967) kaldirildi. */
+
 		  uint32_t timestamp=LoraTimeSync_GetCurrentUnixTime();
 		APP_LOG(TS_OFF, VLEVEL_M, "###### New uuid to send \r\n");
 
@@ -954,11 +953,7 @@ static void SendRFID_Data(void) {
 		  }
 
 	}else{
-		/* Buton basildi ama sure icinde kart okunamadi (timeout). Gonderilecek
-		 * yeni bir kart verisi yok, ama elimizdeki firsati degerlendirip
-		 * buffer'da bekleyen (daha once ACK alamamis) kayit var mi diye
-		 * kontrol edip varsa gonderelim - onceden burada sessizce hicbir
-		 * sey yapilmiyordu. */
+
 		if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET) {
 			APP_LOG(TS_ON, VLEVEL_M,
 					"Henuz join olunmadi, gonderim yerine rejoin deneniyor\r\n");

@@ -1,8 +1,8 @@
-../external_libs/lora_app_auxilary/Src/lora_timesync.c:48:6:LoraTimeSync_Init	4	static
-../external_libs/lora_app_auxilary/Src/lora_timesync.c:54:6:LoraTimeSync_OnJoined	4	static
-../external_libs/lora_app_auxilary/Src/lora_timesync.c:60:10:LoraTimeSync_GetCounterForStatusSend	4	static
-../external_libs/lora_app_auxilary/Src/lora_timesync.c:69:6:LoraTimeSync_OnStatusQueued	4	static
-../external_libs/lora_app_auxilary/Src/lora_timesync.c:78:6:LoraTimeSync_OnStatusAckResult	16	static
-../external_libs/lora_app_auxilary/Src/lora_timesync.c:83:6:LoraTimeSync_HandleDownlink	40	static
-../external_libs/lora_app_auxilary/Src/lora_timesync.c:123:6:LoraTimeSync_IsSynced	8	static
-../external_libs/lora_app_auxilary/Src/lora_timesync.c:128:10:LoraTimeSync_GetCurrentUnixTime	16	static
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:75:6:LoraTimeSync_Init	8	static
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:82:6:LoraTimeSync_OnJoined	4	static
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:88:10:LoraTimeSync_GetCounterForStatusSend	4	static
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:97:6:LoraTimeSync_OnStatusQueued	4	static
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:106:6:LoraTimeSync_OnStatusAckResult	16	static
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:111:6:LoraTimeSync_HandleDownlink	88	static
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:177:6:LoraTimeSync_IsSynced	8	static
+../external_libs/lora_app_auxilary/Src/lora_timesync.c:182:10:LoraTimeSync_GetCurrentUnixTime	16	static

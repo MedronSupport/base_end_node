@@ -192,6 +192,14 @@ Her test: **Ön Koşul → Adımlar → Beklenen Sonuç**. UART log çıktısı 
 - **Adımlar:** Backup domain dahil VDD'yi kes, tekrar ver.
 - **Beklenen:** `IsSynced()` false'a döner, yeni senkron döngüsü gerekir — bkz. [[pcb-flash-erase-resets-count]] ile aynı kategoriden "beklenen sıfırlanma".
 
+### J5b — [SAHADA BULUNDU, DÜZELTİLDİ] Gecikmiş downlink cihaz saatini geriye sarmamalı
+- **Arka plan:** Sahada gözlemlendi — bir zaman senkron yanıtı kendi STATUS'unun ACK penceresini kaçırıp (ağ/sunucu tarafı gecikmesi), ~32 dakika sonra tamamen ilgisiz bir RFID ACK'ine binerek geldi. O ana kadar `g_statusCounter` ilerlemediği için (STATUS periyodu 1 saat) sayaç hâlâ "eşleşiyor" görünüp yanıt kabul edildi ve cihaz saatini 32 dakika geriye sardı. `LoraTimeSync_HandleDownlink()`'e artık geriye doğru sıçramaları reddeden bir kontrol eklendi.
+- **Tolerans SABİT değil, geçen gerçek süreyle ölçekli:** taban 10 sn + (son senkrondan bu yana geçen süre × 500 ppm). Sebep: cihaz günlerce senkronsuz kalırsa, gerçek RTC sapması (donanım kaynaklı, kristal toleransı/sıcaklık) birikip sabit bir eşiği aşabilir — bu durumda haklı bir düzeltmeyi yanlışlıkla reddetmemek için tolerans geçen süreyle birlikte büyüyor. Sahadaki hatalı senaryoda (32 dk'lik sıçrama, ~2,5 saat senkronsuzluk sonrası) izin verilen tolerans hâlâ sadece ~14 sn olduğu için bu senaryo yine reddediliyor.
+- **Adımlar (I):** Bir STATUS mesajının zaman senkron yanıtını sunucu tarafında bilerek geciktir (örn. downlink kuyruğuna hemen koymayıp birkaç dakika bekletip bir sonraki uplink'e denk getir).
+- **Beklenen (I):** Downlink, sayaç eşleşse bile taşıdığı epoch, ölçekli toleransı aşacak kadar geriyse **reddedilmeli** — `LoraTimeSync_GetCurrentUnixTime()` geriye sarılmamalı, hiçbir log basılmamalı (sessiz red, tasarım gereği).
+- **Adımlar (II) — ölçekli toleransın "haklı düzeltmeyi reddetmeme" tarafını doğrula:** Cihazı günlerce (ya da testte, `LORA_TIMESYNC_MAX_DRIFT_PPM`'i geçici büyütüp) senkronsuz bırak, sonra doğru ama epoch'u öncekinden belirgin geride olamayacak normal bir senkron gönder.
+- **Beklenen (II):** Uzun süre geçtiği için tolerans da büyümüş olacağından, meşru küçük bir geri düzeltme (RTC sapması kadar) reddedilmemeli.
+
 ### J6 — ACK alınamayan STATUS retry'ında sayaç ilerlememeli
 - **Ön koşul:** STATUS gönderildi, ACK gelmedi (bkz. E1, `RetryStatusTimer` devrede).
 - **Adımlar:** Retry denemesindeki `"sayac=X"` log değerini ilk denemeyle karşılaştır.

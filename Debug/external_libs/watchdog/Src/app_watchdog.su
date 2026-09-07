@@ -1,2 +1,4 @@
-../external_libs/watchdog/Src/app_watchdog.c:22:6:AppWatchdog_Init	8	static
-../external_libs/watchdog/Src/app_watchdog.c:36:6:AppWatchdog_Refresh	8	static
+../external_libs/watchdog/Src/app_watchdog.c:47:13:AppWatchdog_KickTask	8	static
+../external_libs/watchdog/Src/app_watchdog.c:52:13:AppWatchdog_OnKickTimerEvent	16	static
+../external_libs/watchdog/Src/app_watchdog.c:58:6:AppWatchdog_Init	16	static
+../external_libs/watchdog/Src/app_watchdog.c:77:6:AppWatchdog_Refresh	8	static

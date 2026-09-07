@@ -89,6 +89,7 @@ typedef enum
   CFG_SEQ_Task_StatusMSGEvent,
   CFG_SEQ_Task_JoinTimeoutEvent,
   CFG_SEQ_Task_RfidAckRetryEvent,
+  CFG_SEQ_Task_WatchdogKickEvent,
   /* USER CODE END CFG_SEQ_Task_Id_t */
   CFG_SEQ_Task_NBR
 } CFG_SEQ_Task_Id_t;
