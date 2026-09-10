@@ -47,7 +47,9 @@ external_libs/lora_app_auxilary/Src/lora_timesync.o: \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_spi.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart.h \
  ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart_ex.h \
- ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h
+ ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h \
+ ../Core/Inc/sys_app.h ../Core/Inc/sys_conf.h \
+ ../Utilities/trace/adv_trace/stm32_adv_trace.h
 C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/lora_app_auxilary/Inc/lora_timesync.h:
 ../Utilities/misc/stm32_systime.h:
 ../Utilities/timer/stm32_timer.h:
@@ -101,3 +103,6 @@ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/lora_app_auxilary/Inc
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_hal_uart_ex.h:
 ../Drivers/STM32WLxx_HAL_Driver/Inc/stm32wlxx_ll_system.h:
+../Core/Inc/sys_app.h:
+../Core/Inc/sys_conf.h:
+../Utilities/trace/adv_trace/stm32_adv_trace.h:

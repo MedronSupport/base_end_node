@@ -143,6 +143,19 @@ typedef enum
 #define LORA_RFID_MSG_TYPE_STORED_UID 	 0x54
 #define LORA_RFID_MSG_TYPE_STATUS 		 0x27
 #define LORA_RFID_MSG_TYPE_IND			 0x22
+
+/* Sunucudan gelen komut downlink'i (port LORAWAN_USER_APP_PORT):
+ *   [0] = 0x02 (LORA_COMMAND_DOWNLINK_TYPE)
+ *   [1] = komut ID (bkz LORA_CMD_ID_*)
+ *   [2:N] = komuta ozel parametreler
+ * bkz docs/eylem-plani.md madde 3/4/5 - genel komut protokolunun ilk adimi. */
+#define LORA_COMMAND_DOWNLINK_TYPE		 0x02U
+
+/* Buzzer/LED komutu, 6 byte:
+ *   [0]=0x02 [1]=0x01 [2]=hedef(bit0:buzzer,bit1:led) [3]=pattern(0:surekli,1:bip-bip) [4:5]=istenen sure (ms, buyuk-endian)
+ * NOT: cihaz istenen sureyi HER ZAMAN MAX_BUZZER_LED_DURATION_MS ile sinirlar -
+ * sunucu/yazilim hatasi sonsuz bir bip-bipe yol acamaz. */
+#define LORA_CMD_ID_BUZZER_LED			 0x01U
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/

@@ -247,7 +247,11 @@ static void ResendRfidData(void);
 static void StatusMsgPreventStopMode(void);
 static void  StatusMsgAllowStopMode(void);
 static void OnStatusMessageHandler(void);
-static void SendStatusPart2Handler(void);
+static void SendIndPingHandler(void);
+static void BuzzerLedAllOff(void);
+static void BuzzerLedSafetyStopHandler(void);
+static void BuzzerLedToggleHandler(void);
+static bool LoraCommand_HandleDownlink(const uint8_t *buffer, uint8_t size);
 static void SendBufferedRfidLogHandler(void);
 static void BufferAckTimeoutHandler(void);
 /* Yedi ayri "timer ates alinca sadece bir sequencer task'i tetikle"
@@ -346,15 +350,15 @@ static UTIL_TIMER_Time_t RETRY_STATUS_TIMEOUT= 15000;
  * radyo/duty-cycle ic ice binmesini azaltmak icin araya konan bir bekleme. */
 static UTIL_TIMER_Object_t BufferedDrainDelayTimer;
 #define BUFFERED_DRAIN_DELAY_MS 10000
-/* STATUS'un ACK sonucu (basarili ya da basarisiz) belli olduktan bu kadar
- * sonra, ek bir RX penceresi acmak icin ikinci, hafif (unconfirmed) bir
- * "parca" gonderilir - bkz SendStatusPart2Handler(). Amaci veri tasimak
- * degil, sunucunun kuyrukladigi bir downlink'e (komut, zaman senkron) daha
- * once fark etmeyecegi bir firsat daha vermek - bkz docs/eylem-plani.md
- * madde 1. Radyo/LoRaMAC'in bir onceki (confirmed) alisverisin kuyrugunu
- * toplamasi icin kisa bir pay birakiyoruz. */
-static UTIL_TIMER_Object_t StatusPart2DelayTimer;
-#define STATUS_PART2_DELAY_MS 3000
+/* Iki ayri olaydan (STATUS'un ACK sonucu belli olunca, ya da buton basilip
+ * kart okunamayinca) bu kadar sonra, ek bir RX penceresi acmak icin hafif
+ * (unconfirmed) bir "IND" mesaji gonderilir - bkz SendIndPingHandler().
+ * Amaci veri tasimak degil, sunucunun kuyrukladigi bir downlink'e (komut,
+ * zaman senkron) daha once fark etmeyecegi bir firsat daha vermek - bkz
+ * docs/eylem-plani.md madde 1 ve 2. Radyo/LoRaMAC'in bir onceki alisverisin
+ * kuyrugunu toplamasi icin kisa bir pay birakiyoruz. */
+static UTIL_TIMER_Object_t IndPingDelayTimer;
+#define IND_PING_DELAY_MS 3000
 static uint8_t AppDataBuffer[LORAWAN_APP_DATA_BUFFER_MAX_SIZE];
 /**
   * @brief User application data structure
@@ -383,6 +387,17 @@ static volatile bool join_in_progress = false;
  * buluyor - 35 sn, bunun ~2.2 kati (Nyquist paylı) guvenlik marjidir. */
 #define JOIN_TIMEOUT_MS 35000
 static UTIL_TIMER_Object_t JoinTimeoutTimer;
+
+/* Uzaktan buzzer/LED komutu - bkz docs/eylem-plani.md madde 4. MUTLAK KURAL:
+ * sunucu/yazilim hatasi ne isterse istesin, cihaz bu sureyi ASLA asmaz -
+ * BuzzerLedSafetyTimer, komutun kendi istedigi sureden BAGIMSIZ olarak her
+ * zaman kurulur ve suresi dolunca koşulsuz olarak buzzer/LED'i kapatir. */
+#define MAX_BUZZER_LED_DURATION_MS      15000U
+#define BUZZER_LED_TOGGLE_HALF_PERIOD_MS 300U
+static UTIL_TIMER_Object_t BuzzerLedSafetyTimer;
+static UTIL_TIMER_Object_t BuzzerLedToggleTimer;
+static bool g_buzzerLedTargetBuzzer = false;
+static bool g_buzzerLedTargetLed = false;
 
 volatile bool stop_read_rfid=false;
 static bool RfidStopLockActive = false;
@@ -485,7 +500,9 @@ static const LoraTimerTaskBinding_t kBufferedDrainBinding    = { CFG_SEQ_Task_Se
 static const LoraTimerTaskBinding_t kRfidAckRetryBinding     = { CFG_SEQ_Task_RfidAckRetryEvent,      CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kJoinRetryBinding        = { CFG_SEQ_Task_LoRaRejoinEvent,        CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kJoinTimeoutBinding      = { CFG_SEQ_Task_JoinTimeoutEvent,       CFG_SEQ_Prio_0 };
-static const LoraTimerTaskBinding_t kStatusPart2Binding      = { CFG_SEQ_Task_StatusPart2Event,       CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kIndPingBinding      = { CFG_SEQ_Task_IndPingEvent,       CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kBuzzerLedSafetyBinding = { CFG_SEQ_Task_BuzzerLedSafetyEvent, CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kBuzzerLedToggleBinding = { CFG_SEQ_Task_BuzzerLedToggleEvent, CFG_SEQ_Prio_0 };
 
 /**
   * @brief  Yukaridaki kStatusMsgBinding/kRfidAckTimeoutBinding/... sabitlerinden
@@ -552,8 +569,14 @@ void LoRaWAN_Init(void)
   UTIL_TIMER_Create(&RetryStatusTimer, RETRY_STATUS_TIMEOUT, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kStatusMsgBinding);
 
   //status part2 (ek RX penceresi) - bkz docs/eylem-plani.md madde 1
-  UTIL_TIMER_Create(&StatusPart2DelayTimer, STATUS_PART2_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kStatusPart2Binding);
-  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_StatusPart2Event), UTIL_SEQ_RFU, SendStatusPart2Handler);
+  UTIL_TIMER_Create(&IndPingDelayTimer, IND_PING_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kIndPingBinding);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_IndPingEvent), UTIL_SEQ_RFU, SendIndPingHandler);
+
+  //buzzer/led komutu - bkz docs/eylem-plani.md madde 4
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_BuzzerLedSafetyEvent), UTIL_SEQ_RFU, BuzzerLedSafetyStopHandler);
+  UTIL_TIMER_Create(&BuzzerLedSafetyTimer, MAX_BUZZER_LED_DURATION_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kBuzzerLedSafetyBinding);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_BuzzerLedToggleEvent), UTIL_SEQ_RFU, BuzzerLedToggleHandler);
+  UTIL_TIMER_Create(&BuzzerLedToggleTimer, BUZZER_LED_TOGGLE_HALF_PERIOD_MS, UTIL_TIMER_PERIODIC, OnTimerFiresSetTask, (void *)&kBuzzerLedToggleBinding);
   /* USER CODE END LoRaWAN_Init_1 */
 
   UTIL_TIMER_Create(&JoinRetryTimer, JOIN_RETRY_DELAY, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinRetryBinding);
@@ -731,24 +754,26 @@ static void OnStatusMessageHandler(void)
 }
 
 /**
-  * @brief  STATUS turunun ACK sonucu (basarili/basarisiz) belli olduktan
-  *         STATUS_PART2_DELAY_MS sonra cagrilir (bkz OnTxData). Kritik bir
-  *         veri tasimaz - tek amaci, hafif (unconfirmed) bir uplink ile
-  *         bir RX penceresi daha acip sunucunun kuyrukladigi bir downlink'e
-  *         (komut, zaman senkron) STATUS'un ana penceresini kacirmis olsa
-  *         bile bir sans daha vermek.
+  * @brief  Hafif (unconfirmed), 6 byte'lik bir "IND" mesaji gonderip ek bir
+  *         RX penceresi acar - kritik veri tasimaz, tek amaci sunucunun
+  *         kuyrukladigi bir downlink'e (komut, zaman senkron) bir sans daha
+  *         vermek. Iki ayri olaydan IND_PING_DELAY_MS gecikmeyle tetiklenir:
+  *           1) STATUS'un ACK sonucu (basarili/basarisiz) belli olunca (bkz OnTxData)
+  *           2) Buton basilip kart okunamayinca (bkz SendRFID_Data "else" dali)
   */
-static void SendStatusPart2Handler(void)
+static void SendIndPingHandler(void)
 {
 	if (rfid_data_pending_on_lora || buffered_rfid_data_wait_for_ack || status_data_pending_on_lora)
 	{
 		/* Baska bir gonderim araya girdi - AppData paylasimli oldugu icin
 		 * atlıyoruz. Kritik bir veri tasimadigi icin kaybedilmesi sorun
-		 * degil, bir sonraki STATUS turunde tekrar bir firsat olacak. */
+		 * degil, bir sonraki firsatta tekrar denenecek. */
+		APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping atlandi - baska bir gonderim devam ediyor\r\n");
 		return;
 	}
 	if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET)
 	{
+		APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping atlandi - join yok\r\n");
 		return;
 	}
 
@@ -760,15 +785,144 @@ static void SendStatusPart2Handler(void)
 	WriteU32BE(&AppData.Buffer[2], nowEpoch);
 	AppData.BufferSize = 6;
 
+	APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping gonderiliyor, epoch=%u\r\n", (unsigned int)nowEpoch);
+
 	LmHandlerErrorStatus_t sendStatus = LmHandlerSend(&AppData, LORAMAC_HANDLER_UNCONFIRMED_MSG, false);
 	if (LORAMAC_HANDLER_SUCCESS == sendStatus)
 	{
-		APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS PART2 (IND) gonderildi - ek RX penceresi\r\n");
+		APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping kuyruga alindi - ek RX penceresi\r\n");
 	}
 	else
 	{
-		APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS PART2 gonderilemedi (%d)\r\n", (int)sendStatus);
+		APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping gonderilemedi (%d)\r\n", (int)sendStatus);
 	}
+}
+
+/**
+  * @brief  Buzzer/LED'i (hangisi aktifse) donanimsal olarak kapatir ve
+  *         durum bayraklarini temizler. Hem guvenlik timer'i suresi
+  *         dolduğunda hem yeni bir komut oncekini iptal ederken cagrilir.
+  */
+static void BuzzerLedAllOff(void)
+{
+	if (g_buzzerLedTargetBuzzer)
+	{
+		HAL_GPIO_WritePin(Buzzer_PORT, Buzzer_PIN, GPIO_PIN_RESET);
+		BuzzerNotify_deinit();
+		g_buzzerLedTargetBuzzer = false;
+	}
+	if (g_buzzerLedTargetLed)
+	{
+		awake_led_gpio_deinit();
+		g_buzzerLedTargetLed = false;
+	}
+}
+
+/**
+  * @brief  BuzzerLedSafetyTimer suresi dolunca cagrilir - komutun kendi
+  *         istedigi sure ne olursa olsun, MAX_BUZZER_LED_DURATION_MS
+  *         asildiginda buraya gelinir ve buzzer/LED KOSULSUZ kapatilir.
+  */
+static void BuzzerLedSafetyStopHandler(void)
+{
+	UTIL_TIMER_Stop(&BuzzerLedToggleTimer);
+	BuzzerLedAllOff();
+	APP_LOG(TS_OFF, VLEVEL_M, "###### Buzzer/LED komutu suresi doldu, kapatildi\r\n");
+}
+
+/**
+  * @brief  "Bip-bip" deseni icin periyodik pin degistirme. Surekli desende
+  *         (pattern=0) bu timer hic baslatilmaz, pin sabit ACIK kalir.
+  */
+static void BuzzerLedToggleHandler(void)
+{
+	if (g_buzzerLedTargetBuzzer)
+	{
+		HAL_GPIO_TogglePin(Buzzer_PORT, Buzzer_PIN);
+	}
+	if (g_buzzerLedTargetLed)
+	{
+		awake_led_gpio_toggle();
+	}
+}
+
+/**
+  * @brief  Sunucudan gelen genel komut downlink'ini isler (bkz lora_app.h
+  *         LORA_COMMAND_DOWNLINK_TYPE). Su an sadece buzzer/LED komutunu
+  *         (LORA_CMD_ID_BUZZER_LED) destekliyor - madde 3/5'teki diger
+  *         komutlar ileride buraya birer "else if" olarak eklenecek.
+  * @retval true  Mesaj bir komut olarak taninip islendi (gecerli/gecersiz farketmez).
+  * @retval false Bu bir komut mesaji degildi (tip/boyut uymuyor).
+  */
+static bool LoraCommand_HandleDownlink(const uint8_t *buffer, uint8_t size)
+{
+	if ((buffer == NULL) || (size < 2U) || (buffer[0] != LORA_COMMAND_DOWNLINK_TYPE))
+	{
+		return false;
+	}
+
+	uint8_t cmdId = buffer[1];
+
+	if (cmdId == LORA_CMD_ID_BUZZER_LED)
+	{
+		if (size != 6U)
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "###### Buzzer/LED komutu gecersiz boyut (%d)\r\n", size);
+			return true;
+		}
+
+		uint8_t hedef = buffer[2];
+		uint8_t pattern = buffer[3];
+		uint32_t requestedMs = ((uint32_t)buffer[4] << 8) | (uint32_t)buffer[5];
+		/* MUTLAK KURAL: istenen sure ne olursa olsun (sunucu/yazilim hatasi
+		 * dahil, orn. 0xFFFF), cihaz kendi azami sinirinin USTUNE CIKMAZ. */
+		uint32_t effectiveMs = (requestedMs > MAX_BUZZER_LED_DURATION_MS) ? MAX_BUZZER_LED_DURATION_MS : requestedMs;
+
+		APP_LOG(TS_OFF, VLEVEL_M,
+				"###### Buzzer/LED komutu alindi: hedef=0x%02X, pattern=%u, istenen=%u ms, uygulanan=%u ms\r\n",
+				hedef, pattern, (unsigned int)requestedMs, (unsigned int)effectiveMs);
+
+		/* Onceki bir komut hala aktifse once temizle - yeni komut oncelikli. */
+		UTIL_TIMER_Stop(&BuzzerLedSafetyTimer);
+		UTIL_TIMER_Stop(&BuzzerLedToggleTimer);
+		BuzzerLedAllOff();
+
+		if (effectiveMs == 0U)
+		{
+			return true;
+		}
+
+		g_buzzerLedTargetBuzzer = (hedef & 0x01U) != 0U;
+		g_buzzerLedTargetLed    = (hedef & 0x02U) != 0U;
+
+		if (g_buzzerLedTargetBuzzer)
+		{
+			BuzzerNotify_init();
+			HAL_GPIO_WritePin(Buzzer_PORT, Buzzer_PIN, GPIO_PIN_SET);
+		}
+		if (g_buzzerLedTargetLed)
+		{
+			awake_led_gpio_init();
+			HAL_GPIO_WritePin(AWAKE_LED_PORT, AWAKE_LED_PIN, GPIO_PIN_SET);
+		}
+
+		if (pattern == 1U)
+		{
+			/* Bip-bip: periyodik toggle - donanim zaten ACIK baslatildi. */
+			UTIL_TIMER_Start(&BuzzerLedToggleTimer);
+		}
+
+		/* Guvenlik timer'i HER ZAMAN kurulur - istenen sureden degil,
+		 * UYGULANAN (azami sinirla kisitlanmis) sureden. */
+		UTIL_TIMER_Create(&BuzzerLedSafetyTimer, effectiveMs, UTIL_TIMER_ONESHOT,
+				OnTimerFiresSetTask, (void *)&kBuzzerLedSafetyBinding);
+		UTIL_TIMER_Start(&BuzzerLedSafetyTimer);
+
+		return true;
+	}
+
+	APP_LOG(TS_OFF, VLEVEL_M, "###### Bilinmeyen komut ID: 0x%02X\r\n", cmdId);
+	return true;
 }
 
 static void RfidPreventStopMode(void)
@@ -1020,6 +1174,15 @@ static void SendRFID_Data(void) {
 		}
 		APP_LOG(TS_OFF, VLEVEL_M, "###### Kart okunamadi, buffer kontrol ediliyor\r\n");
 		UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_SendBufferedRFIDEvent), CFG_SEQ_Prio_0);
+		/* Buton basildi ama kart okunamadi - buffer'da gonderilecek bir sey
+		 * varsa yukaridaki satir zaten bir RX firsati acacak (SendBufferedRfidLogHandler
+		 * gonderim yapar ve buffered_rfid_data_wait_for_ack'i true yapar, bu da
+		 * asagidaki IND ping'in guard'inda kendiliginden atlanmasini saglar).
+		 * Buffer BOSSA hicbir radyo islemi olmuyordu - bu firsat tamamen
+		 * kayboluyordu. Simdi her durumda IND ping'i planliyoruz; buffer
+		 * doluysa guard onu atlar, bossa asil faydayi saglar - bkz
+		 * docs/eylem-plani.md madde 2. */
+		UTIL_TIMER_Start(&IndPingDelayTimer);
 	}
 }
 
@@ -1215,6 +1378,12 @@ static void OnRxData(LmHandlerAppData_t *appData, LmHandlerRxParams_t *params)
 	    		APP_LOG(TS_OFF, VLEVEL_M, "###### TIME SYNC alindi: epoch=%u\r\n",
 	    				(unsigned int)LoraTimeSync_GetCurrentUnixTime());
 	    	}
+	    	else
+	    	{
+	    		/* Zaman senkron mesaji degildi - genel komut protokolune bak
+	    		 * (bkz LoraCommand_HandleDownlink, docs/eylem-plani.md madde 3/4/5). */
+	    		LoraCommand_HandleDownlink(appData->Buffer, (uint8_t)appData->BufferSize);
+	    	}
 	    }
 	  }
   /* USER CODE END OnRxData_1 */
@@ -1326,7 +1495,7 @@ static void OnTxData(LmHandlerTxParams_t *params)
 				status_data_pending_on_lora = false;
 				LoraTimeSync_OnStatusAckResult(false);
 				UTIL_TIMER_Start(&RetryStatusTimer);
-				UTIL_TIMER_Start(&StatusPart2DelayTimer);
+				UTIL_TIMER_Start(&IndPingDelayTimer);
 			}
 
 			if(rfid_data_pending_on_lora)
@@ -1414,7 +1583,7 @@ static void OnTxData(LmHandlerTxParams_t *params)
 				status_data_pending_on_lora = false;
 				LoraTimeSync_OnStatusAckResult(true);
 				UTIL_TIMER_Start(&BufferedDrainDelayTimer);
-				UTIL_TIMER_Start(&StatusPart2DelayTimer);
+				UTIL_TIMER_Start(&IndPingDelayTimer);
 			}
 
 			if (rfid_data_pending_on_lora) {

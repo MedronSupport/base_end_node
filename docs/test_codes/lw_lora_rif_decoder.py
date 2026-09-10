@@ -2,6 +2,7 @@ import json
 import base64
 import struct
 import time
+import threading
 import paho.mqtt.client as mqtt
 from datetime import datetime
 
@@ -31,6 +32,58 @@ LORA_RFID_MSG_TYPE_IND        = 0x22
 # --- MESAJ TİPLERİ (downlink, biz tanımlıyoruz - cihaz tarafındaki
 #     LORA_DOWNLINK_MSG_TYPE_TIME_SYNC ile birebir aynı olmalı) ---
 LORA_DOWNLINK_MSG_TYPE_TIME_SYNC = 0x01
+
+# --- GENEL KOMUT PROTOKOLÜ (downlink) - cihaz tarafındaki
+#     LORA_COMMAND_DOWNLINK_TYPE / LORA_CMD_ID_BUZZER_LED ile birebir aynı
+#     olmalı, bkz lora_app.h ---
+LORA_COMMAND_DOWNLINK_TYPE = 0x02
+LORA_CMD_ID_BUZZER_LED = 0x01
+MAX_BUZZER_LED_DURATION_MS = 15000  # cihazin kendi azami siniri - bilerek
+                                     # daha buyugunu de gonderebilelim diye
+                                     # burada AYRICA sinirlamiyoruz, test
+                                     # amacli sunucu tarafinin "kotu" bir
+                                     # deger gonderdigi senaryoyu da deneyebilelim.
+
+# En son gorulen cihazin DevEUI'si - interaktif komutlarda deveui elle
+# yazmaya gerek kalmasin diye.
+last_seen_dev_eui = None
+
+
+def send_buzzer_led_command(client, dev_eui, target=1, pattern=1, duration_ms=5000, confirmed=False):
+    """Cihaza buzzer/LED komutu gonderir:
+    [0]=0x02 (LORA_COMMAND_DOWNLINK_TYPE)
+    [1]=0x01 (LORA_CMD_ID_BUZZER_LED)
+    [2]=hedef (bit0=buzzer, bit1=led - orn. 1=sadece buzzer, 2=sadece led, 3=ikisi)
+    [3]=pattern (0=surekli, 1=bip-bip)
+    [4:6]=istenen sure, ms, buyuk-endian (uint16, azami 65535)
+
+    NOT: duration_ms burada BILEREK MAX_BUZZER_LED_DURATION_MS ile sinirlanmiyor -
+    cihazin KENDI ic guvenlik sinirini (docs/eylem-plani.md madde 4) test
+    edebilmek icin buradan bilerek daha buyuk bir deger de gonderebilmelisin,
+    cihaz onu kendi tarafinda kirpmali."""
+    if not dev_eui or dev_eui == "Bilinmiyor":
+        print("⚠️  DevEUI bilinmiyor, buzzer/led komutu gonderilemedi.")
+        return
+
+    duration_ms = max(0, min(duration_ms, 0xFFFF))  # sadece 2 byte'a sigdirmak icin, cihaz sinirindan BAGIMSIZ
+    payload_bytes = (bytes([LORA_COMMAND_DOWNLINK_TYPE, LORA_CMD_ID_BUZZER_LED, target & 0xFF, pattern & 0xFF])
+                      + struct.pack(">H", duration_ms))
+    payload_b64 = base64.b64encode(payload_bytes).decode("ascii")
+
+    downlink_msg = {
+        "confirmed": confirmed,
+        "fPort": DOWNLINK_FPORT,
+        "data": payload_b64,
+    }
+
+    topic = MQTT_DOWNLINK_TOPIC_FMT.format(deveui=dev_eui)
+    client.publish(topic, json.dumps(downlink_msg))
+    print(f"🔊 Buzzer/LED komutu kuyruga alindi -> {topic} "
+          f"(hedef={target}, pattern={pattern}, istenen_sure={duration_ms} ms, "
+          f"cihazin azami siniri={MAX_BUZZER_LED_DURATION_MS} ms, "
+          f"payload_hex={payload_bytes.hex().upper()})")
+    print("   (Class A geregi bu, cihazin BIR SONRAKI uplink'inin RX penceresinde teslim edilir - "
+          "hemen degil, bir sonraki buton basimi/status turunde etkili olur.)")
 
 
 def send_time_sync_downlink(client, dev_eui, status_count=0, confirmed=False):
@@ -96,6 +149,9 @@ def on_join_message(client, msg):
         payload_str = msg.payload.decode('utf-8')
         payload = json.loads(payload_str)
         dev_eui = payload.get("devEUI", "Bilinmiyor")
+        global last_seen_dev_eui
+        if dev_eui and dev_eui != "Bilinmiyor":
+            last_seen_dev_eui = dev_eui
         print(f"\n🔗 JOIN EVENT (DevEUI: {dev_eui}) - ham payload: {payload_str}")
         # Join anında henüz hiç status gönderilmedi -> status_count=0.
         # confirmed=True: join tek seferlik ve kritik, garantili teslimat istiyoruz.
@@ -124,7 +180,10 @@ def on_message(client, userdata, msg):
         data_hex = data_bytes.hex().upper()
         
         dev_eui = payload.get("devEUI", "Bilinmiyor")
-        
+        global last_seen_dev_eui
+        if dev_eui and dev_eui != "Bilinmiyor":
+            last_seen_dev_eui = dev_eui
+
         print(f"\n📨 YENİ MESAJ (DevEUI: {dev_eui})")
         print(f"Raw Base64 : {data_b64}")
         print(f"Hex        : {data_hex}")
@@ -240,16 +299,112 @@ client.username_pw_set(MQTT_USER, MQTT_PASS)
 client.on_connect = on_connect
 client.on_message = on_message
 
+def _print_downlink_format_banner():
+    """Downlink komut payload yapisini ve gercek, hesaplanmis ornek
+    mesajlari gosterir - cihaz tarafindaki lora_app.h/LoraCommand_HandleDownlink
+    ile birebir ayni format (bkz docs/eylem-plani.md madde 4)."""
+    ornek1 = bytes([LORA_COMMAND_DOWNLINK_TYPE, LORA_CMD_ID_BUZZER_LED, 1, 1]) + struct.pack(">H", 5000)
+    ornek2 = bytes([LORA_COMMAND_DOWNLINK_TYPE, LORA_CMD_ID_BUZZER_LED, 3, 0]) + struct.pack(">H", 8000)
+    ornek3 = bytes([LORA_COMMAND_DOWNLINK_TYPE, LORA_CMD_ID_BUZZER_LED, 1, 1]) + struct.pack(">H", 60000 & 0xFFFF)
+
+    print("\n" + "=" * 60)
+    print("DOWNLINK KOMUT PAYLOAD YAPISI (sunucudan cihaza, 6 byte)")
+    print("=" * 60)
+    print("  byte[0]   = 0x02              <- mesaj kategorisi: KOMUT (sabit)")
+    print("  byte[1]   = 0x01              <- komut ID: buzzer/led (sabit)")
+    print("  byte[2]   = hedef             <- 1=buzzer, 2=led, 3=ikisi birden")
+    print("  byte[3]   = pattern           <- 0=surekli, 1=bip-bip")
+    print("  byte[4:6] = sure_ms           <- buyuk-endian (MSB once), uint16, azami 65535")
+    print("-" * 60)
+    print("ORNEK MESAJLAR:")
+    print(f"  buzzer 1 1 5000   (sadece buzzer, bip-bip, 5 sn)")
+    print(f"    -> hex: {ornek1.hex(' ').upper()}")
+    print(f"       [02]=komut [01]=buzzer/led [01]=hedef:buzzer [01]=pattern:bip-bip [13 88]=5000 ms")
+    print(f"  buzzer 3 0 8000   (buzzer+led, surekli, 8 sn)")
+    print(f"    -> hex: {ornek2.hex(' ').upper()}")
+    print(f"       [02]=komut [01]=buzzer/led [03]=hedef:ikisi [00]=pattern:surekli [1F 40]=8000 ms")
+    print(f"  buzzer 1 1 60000  (KASITLI ASIRI ISTEK - cihazin azami siniri "
+          f"{MAX_BUZZER_LED_DURATION_MS} ms'yi test etmek icin)")
+    print(f"    -> hex: {ornek3.hex(' ').upper()}")
+    print(f"       Cihaz bunu kendi ic guvenlik siniriyla kirpar - UART logunda")
+    print(f"       'istenen=60000 ms, uygulanan={MAX_BUZZER_LED_DURATION_MS} ms' gorulmeli.")
+    print("=" * 60)
+
+
+def _print_command_help():
+    _print_downlink_format_banner()
+    print("\nKomutlar (Enter ile calistir):")
+    print("  buzzer [hedef] [pattern] [sure_ms]")
+    print("      hedef: 1=buzzer, 2=led, 3=ikisi (varsayilan 1)")
+    print("      pattern: 0=surekli, 1=bip-bip (varsayilan 1)")
+    print("      sure_ms: ms cinsinden (varsayilan 5000). Cihazin azami siniri "
+          f"{MAX_BUZZER_LED_DURATION_MS} ms - daha buyugunu gonderip cihazin "
+          "bunu kirptigini test edebilirsin (orn. 'buzzer 1 1 60000').")
+    print("  deveui <deveui>   -> son gorulen DevEUI'yi elle ayarlar")
+    print("  help              -> bu mesaji tekrar goster")
+    print("  exit              -> cikis\n")
+
+
+def _command_input_loop():
+    """MQTT dinlemesi arka planda (loop_start) surerken, ayni terminalden
+    interaktif komut girilebilmesi icin. Buzzer komutu, bir sonraki cihaz
+    uplink'inde (buton basimi/status turu) teslim edilecek sekilde kuyruga
+    alinir - LoRaWAN Class A'nin dogasi geregi aninda gitmez.
+    NOT: format banner'i zaten program baslangicinda (baglantidan once)
+    bir kez gosterildi - burada tekrar etmiyoruz, 'help' yazinca gorulur."""
+    print("Komutlar hazir - format/ornekler icin 'help' yaz.\n")
+    while True:
+        try:
+            line = input("> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if not line:
+            continue
+        parts = line.split()
+        cmd = parts[0].lower()
+
+        if cmd == "exit":
+            break
+        elif cmd == "help":
+            _print_command_help()
+        elif cmd == "deveui":
+            if len(parts) < 2:
+                print("Kullanim: deveui <deveui>")
+                continue
+            global last_seen_dev_eui
+            last_seen_dev_eui = parts[1]
+            print(f"DevEUI ayarlandi: {last_seen_dev_eui}")
+        elif cmd == "buzzer":
+            if not last_seen_dev_eui:
+                print("⚠️  Henuz bir DevEUI gorulmedi/ayarlanmadi - once bir cihaz mesaji bekle "
+                      "ya da 'deveui <deveui>' ile elle ayarla.")
+                continue
+            try:
+                target = int(parts[1]) if len(parts) > 1 else 1
+                pattern = int(parts[2]) if len(parts) > 2 else 1
+                duration_ms = int(parts[3]) if len(parts) > 3 else 5000
+            except ValueError:
+                print("⚠️  Parametreler sayi olmali. Kullanim: buzzer [hedef] [pattern] [sure_ms]")
+                continue
+            send_buzzer_led_command(client, last_seen_dev_eui, target, pattern, duration_ms)
+        else:
+            print(f"⚠️  Bilinmeyen komut: {cmd} ('help' yaz)")
+
+
 if __name__ == "__main__":
+    # Baglanti denemesinden ONCE goster - bekleme/hata olsa bile format hemen gorulsun.
+    _print_downlink_format_banner()
     try:
         # MQTT Sunucusuna Bağlan
         client.connect(MQTT_BROKER, MQTT_PORT, keepalive=60)
-        
-        # Mesajları dinlemek için sonsuz döngü başlat
-        client.loop_forever()
-        
+
+        # Mesaj dinlemeyi arka plan thread'inde baslat, ana thread'i
+        # interaktif komut girisi icin serbest birak.
+        client.loop_start()
+        _command_input_loop()
+
     except KeyboardInterrupt:
         print("\nÇıkış yapılıyor...")
+    finally:
+        client.loop_stop()
         client.disconnect()
-    except Exception as e:
-        print(f"Bağlantı başlatılamadı: {e}")
