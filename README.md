@@ -87,6 +87,8 @@ STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her m
 ## Dokümanlar
 
 - `docs/test-plan-lora_app.md` — senaryo bazlı test planı (buffer, RFID/status ACK zincirleri, rejoin, LPM, zaman senkronu, refactor regresyonu)
+- `docs/urun-yol-haritasi.md` — ürüne dönüşme yol haritası: sunucudan komut alma eksikliği, STATUS parçalama analizi, üretime çıkmadan önce çözülmesi gereken kritik riskler (paylaşılan anahtar, RDP, vb.)
+- `docs/eylem-plani.md` — 2026-09-07'den itibaren yapılacak somut adımlar (komut protokolü, boş basımda RX penceresi, STATUS interval komutu, buzzer/LED komutu, tarih aralığı sorgusu, flash yazım sıklığı) ve bağımlılık sırası
 - `docs/lorawan-devicetimereq-reference.md` — LoRaWAN DeviceTimeReq referansı
 - `docs/milesight-ug63-lorawan-version-mismatch.md` — Milesight UG63 network server ile gözlemlenen LoRaWAN sürüm uyuşmazlığı (üretici cevabı bekleniyor)
 - `external_libs/persistent_circular_buffer/README_TR.md` — kalıcı buffer'ın kendi detaylı dokümantasyonu

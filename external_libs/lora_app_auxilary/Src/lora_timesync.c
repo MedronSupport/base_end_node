@@ -12,6 +12,8 @@
 #include "stm32_systime.h"
 #include "stm32_timer.h"
 #include "rtc.h"
+#include "sys_app.h" /* APP_LOG - genel/uygulamadan bagimsiz bir izleme makrosu,
+                      * bu modulun "lora_app.h'a bagimlilik yok" ilkesini bozmaz. */
 
 /**
   * @brief RTC handle - timer_if.c ile ayni global handle'i paylasir.
@@ -138,6 +140,9 @@ bool LoraTimeSync_HandleDownlink(const uint8_t *buffer, uint8_t size)
         /* stale/gecikmis bir yanit - bozuk bir epoch'u kabul edip cihaz
          * saatini yanlislikla kaydirmaktansa reddediyoruz. Bir sonraki
          * status turunde round-trip yetisirse taze bir yanit gelecektir. */
+        APP_LOG(TS_OFF, VLEVEL_M,
+                "###### TIME SYNC reddedildi: sayac uyusmuyor (gelen=%u, beklenen=%u, gelen epoch=%u)\r\n",
+                (unsigned int)receivedCounter, (unsigned int)currentCounter, (unsigned int)receivedEpoch);
         return false;
     }
 
@@ -161,6 +166,10 @@ bool LoraTimeSync_HandleDownlink(const uint8_t *buffer, uint8_t size)
 
             if (backwardJumpS > allowedToleranceS)
             {
+                APP_LOG(TS_OFF, VLEVEL_M,
+                        "###### TIME SYNC reddedildi: geriye sicrama cok buyuk (gelen epoch=%u, mevcut epoch=%u, sicrama=%u sn, izin verilen=%u sn)\r\n",
+                        (unsigned int)receivedEpoch, (unsigned int)currentEpoch,
+                        (unsigned int)backwardJumpS, (unsigned int)allowedToleranceS);
                 return false;
             }
         }

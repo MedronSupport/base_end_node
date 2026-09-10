@@ -247,6 +247,7 @@ static void ResendRfidData(void);
 static void StatusMsgPreventStopMode(void);
 static void  StatusMsgAllowStopMode(void);
 static void OnStatusMessageHandler(void);
+static void SendStatusPart2Handler(void);
 static void SendBufferedRfidLogHandler(void);
 static void BufferAckTimeoutHandler(void);
 /* Yedi ayri "timer ates alinca sadece bir sequencer task'i tetikle"
@@ -345,6 +346,15 @@ static UTIL_TIMER_Time_t RETRY_STATUS_TIMEOUT= 15000;
  * radyo/duty-cycle ic ice binmesini azaltmak icin araya konan bir bekleme. */
 static UTIL_TIMER_Object_t BufferedDrainDelayTimer;
 #define BUFFERED_DRAIN_DELAY_MS 10000
+/* STATUS'un ACK sonucu (basarili ya da basarisiz) belli olduktan bu kadar
+ * sonra, ek bir RX penceresi acmak icin ikinci, hafif (unconfirmed) bir
+ * "parca" gonderilir - bkz SendStatusPart2Handler(). Amaci veri tasimak
+ * degil, sunucunun kuyrukladigi bir downlink'e (komut, zaman senkron) daha
+ * once fark etmeyecegi bir firsat daha vermek - bkz docs/eylem-plani.md
+ * madde 1. Radyo/LoRaMAC'in bir onceki (confirmed) alisverisin kuyrugunu
+ * toplamasi icin kisa bir pay birakiyoruz. */
+static UTIL_TIMER_Object_t StatusPart2DelayTimer;
+#define STATUS_PART2_DELAY_MS 3000
 static uint8_t AppDataBuffer[LORAWAN_APP_DATA_BUFFER_MAX_SIZE];
 /**
   * @brief User application data structure
@@ -475,6 +485,7 @@ static const LoraTimerTaskBinding_t kBufferedDrainBinding    = { CFG_SEQ_Task_Se
 static const LoraTimerTaskBinding_t kRfidAckRetryBinding     = { CFG_SEQ_Task_RfidAckRetryEvent,      CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kJoinRetryBinding        = { CFG_SEQ_Task_LoRaRejoinEvent,        CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kJoinTimeoutBinding      = { CFG_SEQ_Task_JoinTimeoutEvent,       CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kStatusPart2Binding      = { CFG_SEQ_Task_StatusPart2Event,       CFG_SEQ_Prio_0 };
 
 /**
   * @brief  Yukaridaki kStatusMsgBinding/kRfidAckTimeoutBinding/... sabitlerinden
@@ -539,6 +550,10 @@ void LoRaWAN_Init(void)
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_StatusMSGEvent), UTIL_SEQ_RFU, OnStatusMessageHandler);
 
   UTIL_TIMER_Create(&RetryStatusTimer, RETRY_STATUS_TIMEOUT, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kStatusMsgBinding);
+
+  //status part2 (ek RX penceresi) - bkz docs/eylem-plani.md madde 1
+  UTIL_TIMER_Create(&StatusPart2DelayTimer, STATUS_PART2_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kStatusPart2Binding);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_StatusPart2Event), UTIL_SEQ_RFU, SendStatusPart2Handler);
   /* USER CODE END LoRaWAN_Init_1 */
 
   UTIL_TIMER_Create(&JoinRetryTimer, JOIN_RETRY_DELAY, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinRetryBinding);
@@ -713,6 +728,47 @@ static void OnStatusMessageHandler(void)
 	  }
 
 
+}
+
+/**
+  * @brief  STATUS turunun ACK sonucu (basarili/basarisiz) belli olduktan
+  *         STATUS_PART2_DELAY_MS sonra cagrilir (bkz OnTxData). Kritik bir
+  *         veri tasimaz - tek amaci, hafif (unconfirmed) bir uplink ile
+  *         bir RX penceresi daha acip sunucunun kuyrukladigi bir downlink'e
+  *         (komut, zaman senkron) STATUS'un ana penceresini kacirmis olsa
+  *         bile bir sans daha vermek.
+  */
+static void SendStatusPart2Handler(void)
+{
+	if (rfid_data_pending_on_lora || buffered_rfid_data_wait_for_ack || status_data_pending_on_lora)
+	{
+		/* Baska bir gonderim araya girdi - AppData paylasimli oldugu icin
+		 * atlıyoruz. Kritik bir veri tasimadigi icin kaybedilmesi sorun
+		 * degil, bir sonraki STATUS turunde tekrar bir firsat olacak. */
+		return;
+	}
+	if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET)
+	{
+		return;
+	}
+
+	uint32_t nowEpoch = LoraTimeSync_GetCurrentUnixTime();
+
+	AppData.Port = LORAWAN_USER_APP_PORT;
+	AppData.Buffer[0] = UplinkCounter++;
+	AppData.Buffer[1] = LORA_RFID_MSG_TYPE_IND;
+	WriteU32BE(&AppData.Buffer[2], nowEpoch);
+	AppData.BufferSize = 6;
+
+	LmHandlerErrorStatus_t sendStatus = LmHandlerSend(&AppData, LORAMAC_HANDLER_UNCONFIRMED_MSG, false);
+	if (LORAMAC_HANDLER_SUCCESS == sendStatus)
+	{
+		APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS PART2 (IND) gonderildi - ek RX penceresi\r\n");
+	}
+	else
+	{
+		APP_LOG(TS_OFF, VLEVEL_M, "###### STATUS PART2 gonderilemedi (%d)\r\n", (int)sendStatus);
+	}
 }
 
 static void RfidPreventStopMode(void)
@@ -1270,6 +1326,7 @@ static void OnTxData(LmHandlerTxParams_t *params)
 				status_data_pending_on_lora = false;
 				LoraTimeSync_OnStatusAckResult(false);
 				UTIL_TIMER_Start(&RetryStatusTimer);
+				UTIL_TIMER_Start(&StatusPart2DelayTimer);
 			}
 
 			if(rfid_data_pending_on_lora)
@@ -1357,6 +1414,7 @@ static void OnTxData(LmHandlerTxParams_t *params)
 				status_data_pending_on_lora = false;
 				LoraTimeSync_OnStatusAckResult(true);
 				UTIL_TIMER_Start(&BufferedDrainDelayTimer);
+				UTIL_TIMER_Start(&StatusPart2DelayTimer);
 			}
 
 			if (rfid_data_pending_on_lora) {

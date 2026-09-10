@@ -1,0 +1,55 @@
+ACK ALINAMAMA SORUNU - ÖZET (2026-08-06)
+==========================================
+
+GÖZLEMLENEN DURUM
+-----------------
+~23:50 - ~23:53 arası log kaydında, art arda yapılan 8 RFID okuma+gönderim
+denemesinin (uplink #1 - #8) TAMAMI aynı şekilde başarısız oldu:
+
+  TX on freq ...            -> MAC txDone            (basarili)
+  RX_1 on freq ...           -> IRQ_RX_TX_TIMEOUT -> MAC rxTimeOut   (cevap yok)
+  RX_2 on freq 869525000     -> IRQ_RX_TX_TIMEOUT -> MAC rxTimeOut   (cevap yok)
+  CONFIRMED TX BASARISIZ - ACK ALINAMADI (status=4)
+  -> Veri PCB (persistent circular buffer) flash deposuna kaydedildi
+
+status=4 = LORAMAC_EVENT_INFO_STATUS_RX2_TIMEOUT
+(hem RX1 hem RX2 penceresinde hicbir downlink/ACK alinmadi)
+
+Denemeler farkli EU868 kanallarinda yapildi (868.1 / 868.3 / 868.5 MHz,
+RX2 sabit 869.525 MHz) - hepsi ayni sonucu verdi.
+
+TEŞHİS
+------
+Cihaz kendi tarafina dusen her seyi dogru yapiyor:
+  - TX her seferinde basariyla tamamlaniyor (donanim/radyo sorunsuz)
+  - RX1/RX2 pencereleri doğru zamanda, doğru frekanslarda açılıyor
+  - Sadece hiçbir downlink/ACK gelmiyor
+
+Sekiz denemenin TAMAMINDA %100 ayni, simetrik sessizlik görülmesi,
+sorunun CIHAZ/FIRMWARE'DE DEĞİL, AĞ TARAFINDA olduğuna işaret ediyor.
+
+Olası nedenler (öncelik sırasıyla):
+  1. Gateway şu an ağa bağlı değil / paketleri network server'a
+     iletmiyor (en olası sebep)
+  2. Frame counter (FCnt) uyuşmazlığı - cihaz flash'tan eski bir NVM
+     oturumunu yeni bir join yapmadan geri yüklemiş olabilir; network
+     server MIC doğrulamasını geçemeyen paketleri sessizce reddeder
+  3. Network server'ın kendisi geçici olarak erişilemez/arızalı
+
+KONTROL EDİLECEKLER
+-------------------
+  [ ] Bu log'un öncesinde gerçek bir "###### = JOINED" satırı var mıydı,
+      yoksa cihaz flash'tan eski oturumu mu geri yükledi?
+  [ ] Gateway'in packet forwarder logları - bu 8 TX denemesi RF
+      üzerinden gerçekten duyuluyor mu?
+      - Duyuluyor ama cevap verilmiyorsa -> network server/uygulama
+        tarafında sorun
+      - Hiç duyulmuyorsa -> gateway veya RF bağlantısında sorun
+  [ ] Cihazı zorla rejoin'e zorlayıp tamamen taze bir oturumla deneyin
+      (FCnt uyuşmazlığı ihtimalini eler)
+
+YAN NOT (İLGİSİZ, BİLGİ AMAÇLI)
+-------------------------------
+Log'daki "Onceki RFID gonderimi hala ACK bekliyor, yeni okuma reddedildi"
+satırları bir hata değil - önceki gönderim sonuçlanmadan yeni okumayı
+engelleyen koruma mekanizması doğru çalışıyor.
