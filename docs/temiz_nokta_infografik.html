@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Temiz Nokta — Kolay Kurulum, Güvenilir Veri Aktarımı</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#163A63;
+    --ink-2:#58718E;
+    --paper:#F1F7FF;
+    --paper-2:#FFFFFF;
+    --teal:#1877F2;
+    --teal-deep:#0B5FCC;
+    --mint:#67AFFF;
+    --amber:#F2A93B;
+    --line:#D6E6F7;
+    --blue-soft:#E7F1FF;
+    --blue-pale:#F7FAFF;
+    --shadow:0 18px 42px -26px rgba(24,119,242,.28);
+    --r-lg:22px; --r-md:14px; --r-sm:8px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:linear-gradient(180deg,#F8FBFF 0%,var(--paper) 38%,#FFFFFF 100%);color:var(--ink);font-family:"Manrope",ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+  body{line-height:1.5;font-size:16px}
+  .page{max-width:1200px;margin:0 auto;padding:36px 28px 80px}
+  h1,h2,h3{margin:0;line-height:1.1;letter-spacing:-.02em}
+  p{margin:0}
+
+  /* ---------- Brand bar ---------- */
+  .brand{display:flex;align-items:center;gap:12px;margin-bottom:28px}
+  .brand .dot{width:34px;height:34px;border-radius:50%;background:var(--teal);position:relative;flex:none}
+  .brand .dot::after{content:"";position:absolute;inset:10px;border-radius:50%;background:#fff}
+  .brand b{font-weight:800;font-size:19px;letter-spacing:-.01em}
+  .brand span{color:var(--ink-2);font-size:14px;font-weight:500}
+
+  /* ---------- Hero ---------- */
+  .hero{display:flex;flex-direction:column;gap:26px}
+  .sim{background:var(--paper-2);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:18px;display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:18px;min-height:420px;overflow:hidden}
+  .simleft{min-width:0;overflow:hidden}
+  .sim svg{width:100%;height:auto;max-height:520px;display:block}
+  .simhead{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px}
+  .simclock{display:flex;align-items:baseline;gap:8px}
+  .simclock small{font-size:12px;font-weight:700;color:#7F9AA2}
+  .simclock b{font-size:22px;font-weight:800;letter-spacing:-.02em}
+  .simstatus{font-size:13px;font-weight:700;color:var(--teal);background:var(--paper);padding:5px 12px;border-radius:99px}
+  .simleft{display:flex;flex-direction:column}
+  .headline{display:flex;flex-direction:column;gap:12px;padding:0 4px 2px}
+  .headline h1{font-size:clamp(30px,3.8vw,46px);font-weight:800;letter-spacing:.01em;line-height:1.12;max-width:920px}
+  .headline p{font-size:17px;color:var(--ink-2);max-width:78ch}
+  .headline .small{font-size:17px;color:#113E73;max-width:84ch;font-weight:800;line-height:1.45;background:linear-gradient(135deg,#EAF3FF,#DCEBFF);border:1px solid #C8DCF8;border-left:6px solid var(--teal);padding:14px 16px;border-radius:16px;box-shadow:0 12px 28px -20px rgba(24,119,242,.35)}
+  .headline .small strong{display:block;font-size:19px;color:#0B5FCC;margin-top:4px}
+
+  /* dashboard panel inside sim */
+  .dash{background:linear-gradient(155deg,#1B2B3A 0%,#22384C 55%,#28465A 100%);color:#F7FBFF;border-radius:var(--r-md);padding:12px 14px 12px;display:flex;flex-direction:column;gap:10px;font-size:13px;border:1px solid rgba(255,255,255,.06);box-shadow:inset 0 1px 0 rgba(255,255,255,.04)}
+  .dash .top{display:flex;justify-content:space-between;align-items:center}
+  .dash .top b{font-size:14px;font-weight:700;display:block;line-height:1.15}
+  .tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0;border-bottom:1px solid rgba(255,255,255,.10);margin:-4px -4px 2px;font-size:9.5px;font-weight:700;color:#BFD2E4}
+  .tabs span{padding:5px 2px 8px;border-bottom:2px solid transparent;white-space:nowrap;text-align:center;min-width:0;letter-spacing:.01em}
+  .tabs .on{color:#FFFFFF;border-bottom-color:#7CC2FF;background:rgba(255,255,255,.08);border-top-left-radius:8px;border-top-right-radius:8px}
+  .who{display:flex;align-items:center;gap:8px}
+  .who i{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#9AD8FF,#6CC3FF);color:#17324D;font-style:normal;font-weight:800;font-size:12px;display:grid;place-items:center;flex:none;box-shadow:0 4px 12px rgba(0,0,0,.14)}
+  .who small{display:block;color:#AFC2D4;font-size:11px;font-weight:600}
+  .dash .clock{font-weight:800;font-size:22px;letter-spacing:-.02em;color:#F7FBFF}
+  .dash .kpis{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .kpi{background:rgba(255,255,255,.07);border-radius:var(--r-sm);padding:8px 10px;border:1px solid rgba(255,255,255,.06)}
+  .kpi small{display:block;color:#BFD2E4;font-size:11px;font-weight:600}
+  .kpi strong{font-size:18px;font-weight:800;color:#fff}
+  .batt{display:flex;align-items:center;gap:6px}
+  .batt i{display:inline-block;width:26px;height:12px;border:1.5px solid #BFD2E4;border-radius:3px;position:relative}
+  .batt i::before{content:"";position:absolute;left:2px;top:2px;bottom:2px;width:calc(var(--lvl,94%) - 4px);background:linear-gradient(90deg,#5CD67A,#9BE15D);border-radius:1px}
+  .batt i::after{content:"";position:absolute;right:-4px;top:3px;width:2px;height:6px;background:#BFD2E4;border-radius:1px}
+  .feed{display:flex;flex-direction:column;gap:5px;min-height:150px}
+  .feed .row{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;background:rgba(255,255,255,.055);border-radius:var(--r-sm);padding:6px 8px;animation:rowIn .5s ease both;border:1px solid rgba(255,255,255,.045)}
+  .feed .row.new{outline:1.5px solid var(--mint)}
+  .feed .t{font-weight:700;color:#fff}
+  .feed .r{color:#E6EEF6}
+  .chip{font-size:10px;font-weight:700;padding:2px 7px;border-radius:99px;white-space:nowrap}
+  .chip.ok{background:var(--mint);color:#0B3A2E}
+  .chip.wait{background:var(--amber);color:#3E2A05}
+  .feed .empty{color:#BFD2E4;font-size:12px;padding:10px 4px}
+  @keyframes rowIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+  .legend{color:#AFC2D4;font-size:11px;line-height:1.45;border-top:1px solid rgba(255,255,255,.08);padding-top:8px}
+
+  /* ---------- Sections ---------- */
+  section{margin-top:64px}
+  .sec-head{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);gap:24px;align-items:end;margin-bottom:28px}
+  .sec-head h2{font-size:clamp(26px,3vw,36px);font-weight:800}
+  .sec-head p{color:var(--ink-2);font-size:16px;max-width:52ch}
+
+  /* Cycle ring */
+  .ring{background:linear-gradient(180deg,#FFFFFF,#F8FBFF);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:20px}
+  .ring svg{width:100%;height:auto;display:block;max-width:1100px;margin:0 auto}
+
+  /* Features */
+  .features{display:flex;flex-direction:column;gap:22px}
+  .feature-row{width:88%;display:grid;grid-template-columns:minmax(300px,.95fr) minmax(0,1.25fr);background:var(--paper-2);border:1px solid rgba(24,119,242,.10);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden;min-height:215px}
+  .feature-row:nth-child(odd){margin-left:auto;margin-right:0}
+  .feature-row:nth-child(even){margin-left:0;margin-right:auto}
+  .feature-row:nth-child(even) .feature-art{order:2}
+  .feature-row:nth-child(even) .feat{order:1}
+  .feature-art{background:linear-gradient(135deg,#F8FBFF,#E3F0FF);min-height:215px;display:grid;place-items:center;overflow:hidden;border-right:1px solid rgba(24,119,242,.08)}
+  .feature-row:nth-child(even) .feature-art{border-right:0;border-left:1px solid rgba(24,119,242,.08)}
+  .feature-art svg{width:100%;height:100%;min-height:215px;display:block}
+  .feat{padding:32px 34px;display:flex;flex-direction:column;justify-content:center;gap:10px;position:relative;background:#fff}
+  .feat .num{position:absolute;right:24px;top:18px;font-size:56px;font-weight:800;line-height:1;color:#DCEBFF;letter-spacing:-.05em}
+  .feature-row:nth-child(even) .feat .num{right:auto;left:24px}
+  .feature-row:nth-child(even) .feat{padding-left:34px;padding-right:34px}
+  .feat h3{font-size:21px;font-weight:800;max-width:26ch;color:var(--ink)}
+  .feat p{font-size:15px;color:var(--ink-2);max-width:54ch}
+
+  /* Stats */
+  .stats{display:grid;grid-template-columns:1.1fr .9fr;gap:16px}
+  .stat{border-radius:var(--r-lg);padding:34px 32px;position:relative;overflow:hidden}
+  .stat.a{background:linear-gradient(145deg,#1A4B88,#2668B8);color:#F8FBFF}
+  .stat.b{background:linear-gradient(145deg,#FFFFFF,#F3F8FF);color:var(--ink);border:1px solid var(--line);box-shadow:var(--shadow)}
+  .stat .big{font-size:clamp(56px,7vw,96px);font-weight:800;letter-spacing:-.04em;line-height:1;color:#fff}
+  .stat .big small{font-size:.38em;font-weight:700;letter-spacing:-.01em;margin-left:6px}
+  .stat p{margin-top:12px;font-size:16px;max-width:36ch;opacity:.92}
+  .stat .h{font-size:14px;font-weight:700;opacity:.8;margin-bottom:8px}
+  .stat .art{position:absolute;right:22px;top:22px;bottom:22px;width:150px;opacity:.9}
+  .stat.b .big{font-size:clamp(34px,3.6vw,46px);letter-spacing:-.02em;line-height:1.1;color:#1D4F91}
+
+
+  footer{margin-top:40px;color:var(--ink-2);font-size:13px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:980px){
+    .sim{grid-template-columns:1fr}
+    .sim svg{max-height:none}
+    .dash{min-height:330px}
+    .feature-row{width:100%;margin-left:0!important;margin-right:0!important;grid-template-columns:1fr 1.2fr}
+    .stats{grid-template-columns:1fr}
+    .sec-head{grid-template-columns:1fr}
+  }
+  @media (max-width:680px){
+    .feature-row{grid-template-columns:1fr}
+    .feature-row:nth-child(even) .feature-art,.feature-row:nth-child(even) .feat{order:initial}
+    .feature-art{min-height:180px}
+    .feature-art svg{min-height:180px}
+    .feat{padding:24px 22px}
+    .tabs{font-size:9px}
+  }
+  @media (max-width:560px){.page{padding:22px 16px 60px}}
+  @media (prefers-reduced-motion:reduce){
+    .feed .row{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="brand">
+    <div class="dot" aria-hidden="true"></div>
+    <div><b>Temiz Nokta</b> &nbsp;<span>Temizlik personeli oda takip sistemi</span></div>
+  </div>
+
+  <!-- ================= HERO ================= -->
+  <div class="hero">
+    <div class="headline">
+      <h1>KOLAY KURULUM, GÜVENİLİR VERİ AKTARIMI</h1>
+      <p>Her odanın kapısına küçük, pilsiz bir kart yapıştırın. Personel elindeki cihazı karta dokundursun. Hangi oda, saat kaç — anında yönetim ekranınızda.</p>
+      <p class="small">Kablo yok, priz yok, her kata ayrı alıcı yok.<strong>Binanın tamamı için tek bir merkez noktası yeterli.</strong></p>
+    </div>
+
+    <div class="sim" aria-label="Canlı benzetim: personel odaları dolaşırken bildirimler merkeze ulaşıyor">
+      <div class="simleft">
+      <div class="simhead"><span class="simclock"><small>Saat</small><b id="clockSvg">09:00</b></span><span class="simstatus" id="status">Odaya gidiliyor</span></div>
+      <svg id="plan" viewBox="0 0 640 460" role="img" aria-labelledby="planTitle">
+        <title id="planTitle">Bina krokisi benzetimi</title>
+        <defs>
+          <pattern id="tiles" width="16" height="16" patternUnits="userSpaceOnUse">
+            <rect width="16" height="16" fill="#F6FAFB"/>
+            <path d="M16 0H0V16" fill="none" stroke="#E4EEF1" stroke-width="1"/>
+          </pattern>
+          <filter id="soft"><feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#163A63" flood-opacity=".14"/></filter>
+        </defs>
+
+        <!-- building shell -->
+        <rect x="20" y="30" width="600" height="400" rx="18" fill="url(#tiles)" stroke="#D6E6F7" stroke-width="2"/>
+        <!-- corridor -->
+        <rect x="20" y="168" width="600" height="124" fill="#EAF3FF"/>
+        <text x="40" y="186" font-size="12" font-weight="700" fill="#7F9AA2">Koridor</text>
+
+        <!-- rooms top -->
+        <g id="rooms" font-family="Manrope, sans-serif"></g>
+
+        <!-- central receiver (service room) -->
+        <g id="gw" transform="translate(320,230)">
+          <circle r="34" fill="#1877F2" opacity=".12"/>
+          <circle r="22" fill="#fff" stroke="#1877F2" stroke-width="2.5"/>
+          <path d="M-9 4a12 12 0 0 1 18 0M-5 8a6 6 0 0 1 10 0M-13 0a18 18 0 0 1 26 0" fill="none" stroke="#1877F2" stroke-width="2.2" stroke-linecap="round"/>
+          <circle cy="11" r="2.2" fill="#1877F2"/>
+          <text y="46" text-anchor="middle" font-size="12" font-weight="800" fill="#0B5FCC">LoraWAN Gateway</text>
+          <circle id="gwPulse" r="22" fill="none" stroke="#67AFFF" stroke-width="3" opacity="0"/>
+        </g>
+
+        <!-- signal layer -->
+        <g id="sig"></g>
+
+        <!-- staff -->
+        <g id="staff" filter="url(#soft)">
+          <ellipse cy="26" rx="10" ry="3" fill="#163A63" opacity=".15"/>
+          <path d="M-6 6v16M6 6v16" stroke="#163A63" stroke-width="5" stroke-linecap="round"/>
+          <path d="M-9 -6h18l-3 15h-12z" fill="#1877F2"/>
+          <path d="M-9 -4l-6 10" stroke="#1877F2" stroke-width="4.5" stroke-linecap="round"/>
+          <path d="M9 -4l6 8" stroke="#1877F2" stroke-width="4.5" stroke-linecap="round"/>
+          <circle cy="-15" r="8" fill="#FFE1C4"/>
+          <path d="M-8 -17a8 8 0 0 1 16 0z" fill="#163A63"/>
+          <g id="handheld" transform="translate(15,4)"><rect x="-3.5" y="-6" width="7" height="12" rx="2" fill="#163A63"/><rect x="-2" y="-4" width="4" height="6" rx="1" fill="#67AFFF"/></g>
+        </g>
+
+        <!-- metal zone hint -->
+        <g id="metalHint" opacity="0">
+          <rect x="506" y="272" width="108" height="18" rx="5" fill="#FFF1D6"/>
+          <text x="560" y="285" text-anchor="middle" font-size="10" font-weight="700" fill="#8A5A08">Metal kapı — sinyal zayıf</text>
+        </g>
+      </svg>
+      </div>
+
+      <aside class="dash" aria-live="polite">
+        <nav class="tabs" aria-label="Dashboard sekmeleri"><span class="on">Canlı takip</span><span>Raporlama</span><span>Mesai analizi</span><span>Isı haritası</span></nav>
+        <div class="top">
+          <div class="who"><i>AK</i><div><b>Ayşe Kaya</b><small>Kat görevlisi · 2. kat &nbsp;▾</small></div></div>
+          <span class="clock" id="clock">09:00</span>
+        </div>
+        <div class="kpis">
+          <div class="kpi"><small>Bugün temizlenen</small><strong id="kCount">0 oda</strong></div>
+          <div class="kpi"><small>Cihaz pili</small><strong class="batt"><i id="battBar" style="--lvl:94%"></i><span id="battTxt">%94</span></strong></div>
+        </div>
+        <div class="feed" id="feed"><div class="empty">Henüz bildirim yok. Vardiya 09:00'da başlıyor.</div></div>
+        <div class="legend">Yeşil: merkeze ulaştı ve teyit edildi. Turuncu: cihazda bekliyor, bağlantı gelince kendiliğinden gönderilir.</div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- ================= CYCLE ================= -->
+  <section>
+    <div class="sec-head">
+      <h2>Bir bildirim nasıl yolculuk eder?</h2>
+      <p>Her dokunuşta aynı altı adım tekrar eder. Bağlantı olmadığında bile hiçbir kayıt kaybolmaz; cihaz bilgiyi saklar ve ilk fırsatta kendisi gönderir.</p>
+    </div>
+    <div class="ring"><svg viewBox="0 0 1240 800" role="img" aria-label="Altı adımlı döngü">
+<defs><marker id="arr" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0L10 5L0 10z" fill="#1877F2"/></marker></defs>
+<circle cx="620" cy="410" r="225" fill="none" stroke="#D6E6F7" stroke-width="3" stroke-dasharray="4 9"/>
+<path d="M700.6 199.9A225 225 0 0 1 758.5 232.7" fill="none" stroke="#1877F2" stroke-width="4" stroke-linecap="round" marker-end="url(#arr)"/>
+<path d="M842.2 374.8A225 225 0 0 1 842.8 441.3" fill="none" stroke="#1877F2" stroke-width="4" stroke-linecap="round" marker-end="url(#arr)"/>
+<path d="M761.6 584.9A225 225 0 0 1 704.3 618.6" fill="none" stroke="#1877F2" stroke-width="4" stroke-linecap="round" marker-end="url(#arr)"/>
+<path d="M539.4 620.1A225 225 0 0 1 481.5 587.3" fill="none" stroke="#1877F2" stroke-width="4" stroke-linecap="round" marker-end="url(#arr)"/>
+<path d="M397.8 445.2A225 225 0 0 1 397.2 378.7" fill="none" stroke="#1877F2" stroke-width="4" stroke-linecap="round" marker-end="url(#arr)"/>
+<path d="M478.4 235.1A225 225 0 0 1 535.7 201.4" fill="none" stroke="#1877F2" stroke-width="4" stroke-linecap="round" marker-end="url(#arr)"/>
+<circle cx="620.0" cy="185.0" r="30" fill="#1877F2"/><text x="620.0" y="193.0" text-anchor="middle" font-size="22" font-weight="800" fill="#fff" font-family="Manrope,sans-serif">1</text>
+<text x="620.0" y="115.0" text-anchor="middle" font-family="Manrope,sans-serif" font-size="19" font-weight="800" fill="#163A63">Karta dokunulur</text>
+<text x="620.0" y="137.0" text-anchor="middle" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">Oda girişindeki pilsiz kart, hangi</text>
+<text x="620.0" y="155.0" text-anchor="middle" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">odada ve hangi anda olunduğunu söyler.</text>
+<circle cx="814.9" cy="297.5" r="30" fill="#1877F2"/><text x="814.9" y="305.5" text-anchor="middle" font-size="22" font-weight="800" fill="#fff" font-family="Manrope,sans-serif">2</text>
+<text x="858.9" y="289.5" text-anchor="start" font-family="Manrope,sans-serif" font-size="19" font-weight="800" fill="#163A63">Anında onay verilir</text>
+<text x="858.9" y="311.5" text-anchor="start" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">Kısa bir ses ve ışıkla personel,</text>
+<text x="858.9" y="329.5" text-anchor="start" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">dokunuşun alındığını o an görür.</text>
+<circle cx="814.9" cy="522.5" r="30" fill="#1877F2"/><text x="814.9" y="530.5" text-anchor="middle" font-size="22" font-weight="800" fill="#fff" font-family="Manrope,sans-serif">3</text>
+<text x="858.9" y="514.5" text-anchor="start" font-family="Manrope,sans-serif" font-size="19" font-weight="800" fill="#163A63">Bildirim merkeze gönderilir</text>
+<text x="858.9" y="536.5" text-anchor="start" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">Uzun menzilli kablosuz bağlantıyla</text>
+<text x="858.9" y="554.5" text-anchor="start" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">binadaki tek merkez noktasına ulaşır.</text>
+<circle cx="620.0" cy="635.0" r="30" fill="#1877F2"/><text x="620.0" y="643.0" text-anchor="middle" font-size="22" font-weight="800" fill="#fff" font-family="Manrope,sans-serif">4</text>
+<text x="620.0" y="697.0" text-anchor="middle" font-family="Manrope,sans-serif" font-size="19" font-weight="800" fill="#163A63">Sunucu teyit eder</text>
+<text x="620.0" y="719.0" text-anchor="middle" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">Cihaz göndermekle yetinmez; bilginin</text>
+<text x="620.0" y="737.0" text-anchor="middle" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">yerine ulaştığına dair onay bekler.</text>
+<circle cx="425.1" cy="522.5" r="30" fill="#E9A83A"/><text x="425.1" y="530.5" text-anchor="middle" font-size="22" font-weight="800" fill="#3E2A05" font-family="Manrope,sans-serif">5</text>
+<text x="381.1" y="514.5" text-anchor="end" font-family="Manrope,sans-serif" font-size="19" font-weight="800" fill="#163A63">Bağlantı yoksa saklanır</text>
+<text x="381.1" y="536.5" text-anchor="end" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">Bilgi cihazda kaybolmadan bekler.</text>
+<text x="381.1" y="554.5" text-anchor="end" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">Bağlantı gelince orijinal saatiyle</text>
+<text x="381.1" y="572.5" text-anchor="end" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">kendiliğinden gönderilir.</text>
+<circle cx="425.1" cy="297.5" r="30" fill="#1877F2"/><text x="425.1" y="305.5" text-anchor="middle" font-size="22" font-weight="800" fill="#fff" font-family="Manrope,sans-serif">6</text>
+<text x="381.1" y="289.5" text-anchor="end" font-family="Manrope,sans-serif" font-size="19" font-weight="800" fill="#163A63">Döngü yeniden başlar</text>
+<text x="381.1" y="311.5" text-anchor="end" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">Bir sonraki odanın kartına</text>
+<text x="381.1" y="329.5" text-anchor="end" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">dokunulduğunda aynı adımlar tekrar</text>
+<text x="381.1" y="347.5" text-anchor="end" font-family="Manrope,sans-serif" font-size="13.5" fill="#58718E">eder.</text>
+<text x="620" y="400" text-anchor="middle" font-family="Manrope,sans-serif" font-size="21" font-weight="800" fill="#163A63">Dokun → Onayla → Gönder → Teyit al</text>
+<text x="620" y="428" text-anchor="middle" font-family="Manrope,sans-serif" font-size="14" fill="#58718E">Sonraki odada baştan başlar</text>
+</svg></div>
+  </section>
+
+  <!-- ================= FEATURES ================= -->
+  <section>
+    <div class="sec-head">
+      <h2>Öne çıkan özellikler</h2>
+      <p>Kurulduğu gibi çalışan, büyüdükçe sizinle büyüyen bir sistem.</p>
+    </div>
+    <div class="features">
+      <article class="feature-row">
+        <div class="feature-art" aria-hidden="true">
+          <svg viewBox="0 0 420 220">
+            <rect width="420" height="220" fill="#F1F7FF"/>
+            <rect x="56" y="18" width="180" height="190" rx="8" fill="#B88964"/>
+            <rect x="74" y="34" width="144" height="174" rx="5" fill="#C99A74"/>
+            <circle cx="198" cy="120" r="7" fill="#163A63"/>
+            <rect x="236" y="66" width="58" height="72" rx="9" fill="#fff" stroke="#D6E6F7" stroke-width="2"/>
+            <circle cx="265" cy="102" r="10" fill="#DFF4EF"/>
+            <path d="M258 102h14M265 95v14" stroke="#1877F2" stroke-width="3" stroke-linecap="round"/>
+            <path d="M330 170c-5-34-17-60-36-74-15-11-31-11-45-2" fill="none" stroke="#FFE1C4" stroke-width="24" stroke-linecap="round"/>
+            <path d="M316 157c-18-13-35-25-51-35" fill="none" stroke="#163A63" stroke-width="5" stroke-linecap="round" opacity=".25"/>
+            <circle cx="330" cy="174" r="22" fill="#1877F2" opacity=".12"/>
+          </svg>
+        </div>
+        <div class="feat"><span class="num">01</span><h3>Kolay kurulum</h3><p>Odaya kart yapıştırmak yeterli. Elektrik tesisatı, kablo kanalı, kat başına alıcı gerekmez.</p></div>
+      </article>
+
+      <article class="feature-row">
+        <div class="feature-art" aria-hidden="true">
+          <svg viewBox="0 0 420 220">
+            <rect width="420" height="220" fill="#EDF5FF"/>
+            <rect x="42" y="66" width="58" height="92" rx="13" fill="#fff" stroke="#D6E6F7" stroke-width="2"/>
+            <rect x="51" y="78" width="40" height="48" rx="5" fill="#E2F0FF"/>
+            <circle cx="71" cy="142" r="6" fill="#1877F2"/>
+            <path d="M108 111H178" stroke="#1877F2" stroke-width="3" stroke-dasharray="6 7"/>
+            <path d="M166 103l12 8-12 8" fill="none" stroke="#1877F2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="190" y="47" width="70" height="126" rx="12" fill="#163A63"/>
+            <rect x="201" y="61" width="48" height="12" rx="4" fill="#67AFFF" opacity=".55"/>
+            <rect x="201" y="82" width="48" height="12" rx="4" fill="#67AFFF" opacity=".35"/>
+            <rect x="201" y="103" width="48" height="12" rx="4" fill="#67AFFF" opacity=".35"/>
+            <circle cx="225" cy="145" r="18" fill="#67AFFF"/><path d="M216 145l7 7 12-15" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M272 111H340" stroke="#1877F2" stroke-width="3" stroke-dasharray="6 7"/>
+            <path d="M328 103l12 8-12 8" fill="none" stroke="#1877F2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="347" y="72" width="55" height="80" rx="6" fill="#fff" stroke="#D6E6F7" stroke-width="2"/>
+            <rect x="356" y="85" width="37" height="7" rx="3" fill="#1877F2" opacity=".3"/>
+            <rect x="356" y="99" width="14" height="37" rx="3" fill="#67AFFF"/><rect x="374" y="108" width="8" height="28" rx="2" fill="#1877F2"/><rect x="386" y="94" width="7" height="42" rx="2" fill="#7EB7F4"/>
+          </svg>
+        </div>
+        <div class="feat"><span class="num">02</span><h3>Güvenilir veri aktarımı</h3><p>Her bildirim için sunucudan onay beklenir. Bağlantı koparsa kayıt saklanır, sonra kendiliğinden gönderilir.</p></div>
+      </article>
+
+      <article class="feature-row">
+        <div class="feature-art" aria-hidden="true">
+          <svg viewBox="0 0 420 220">
+            <rect width="420" height="220" fill="#F0F6FF"/>
+            <path d="M42 170V74l72-40 72 40v96z" fill="#fff" stroke="#D6E6F7" stroke-width="2"/>
+            <path d="M58 84h112M58 112h112M58 140h112" stroke="#D7E5E8" stroke-width="2"/>
+            <path d="M96 54v116M132 54v116" stroke="#D7E5E8" stroke-width="2"/>
+            <rect x="76" y="94" width="18" height="26" rx="3" fill="#E7F1FF" stroke="#1877F2"/><rect x="114" y="121" width="18" height="26" rx="3" fill="#E7F1FF" stroke="#1877F2"/>
+            <path d="M186 112H260" stroke="#1877F2" stroke-width="3" stroke-dasharray="5 7"/>
+            <circle cx="302" cy="112" r="49" fill="#1877F2" opacity=".1"/><circle cx="302" cy="112" r="32" fill="#fff" stroke="#1877F2" stroke-width="2"/>
+            <path d="M286 112a22 22 0 0 1 32 0M292 118a14 14 0 0 1 20 0M297 124a7 7 0 0 1 10 0" fill="none" stroke="#1877F2" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="302" cy="133" r="3" fill="#1877F2"/>
+            <text x="302" y="188" text-anchor="middle" font-size="14" font-weight="800" fill="#0B5FCC">TEK MERKEZ</text>
+          </svg>
+        </div>
+        <div class="feat"><span class="num">03</span><h3>Düşük altyapı maliyeti</h3><p>Binanın tamamı için tek bir merkez noktası. Ekstra kablolama, priz ve cihaz masrafı yok.</p></div>
+      </article>
+
+      <article class="feature-row">
+        <div class="feature-art" aria-hidden="true">
+          <svg viewBox="0 0 420 220">
+            <rect width="420" height="220" fill="#EDF5FF"/>
+            <rect x="34" y="48" width="146" height="124" rx="8" fill="#fff" stroke="#B9D3F0" stroke-width="2"/>
+            <path d="M54 68h46v36H54zM112 68h48v36h-48zM54 116h30v36H54zM96 116h64v36H96z" fill="#E3EEFB" stroke="#A8C8E8"/>
+            <rect x="86" y="97" width="12" height="16" rx="2" fill="#fff" stroke="#1877F2"/>
+            <path d="M196 110h58" stroke="#1877F2" stroke-width="3" stroke-dasharray="5 6"/><path d="M242 102l12 8-12 8" fill="none" stroke="#1877F2" stroke-width="3"/>
+            <rect x="270" y="48" width="116" height="124" rx="8" fill="#E0EDFF" stroke="#8DBCEB" stroke-width="2"/>
+            <path d="M286 65h38v38h-38zM335 65h35v38h-35zM286 114h28v38h-28zM325 114h45v38h-45z" fill="#D5E8FF" stroke="#7AA8D8"/>
+            <circle cx="386" cy="62" r="24" fill="#1877F2"/><path d="M386 51v22M375 62h22" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="feat"><span class="num">04</span><h3>Esnek tasarım imkânı</h3><p>Yeni oda, kat ya da bina eklemek bir kart yapıştırmaktan ibaret. Sistem sizinle birlikte büyür.</p></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= STATS ================= -->
+  <section>
+    <div class="stats">
+      <div class="stat a">
+        <div class="h">Şarj gerektirmeden çalışma süresi</div>
+        <div class="big">2,4<small>yıl</small></div>
+        <p>Tek bir 18650 lityum-iyon pille, yaklaşık bu süre boyunca şarj istemeden çalışır.</p>
+        <svg class="art" viewBox="0 0 150 200" aria-hidden="true">
+          <rect x="45" y="20" width="60" height="160" rx="14" fill="none" stroke="#E7EEF6" stroke-width="3"/>
+          <rect x="63" y="10" width="24" height="12" rx="4" fill="#C9D4E2"/>
+          <rect x="53" y="52" width="44" height="120" rx="8" fill="#62D26F"/>
+          <rect x="53" y="28" width="44" height="18" rx="6" fill="#FFC857" opacity=".9"/>
+        </svg>
+      </div>
+      <div class="stat b">
+        <div class="h">Taşınabilirlik</div>
+        <div class="big">Cepte, elde, gün boyu yanında.</div>
+        <p>Personelin vardiya boyunca rahatça taşıyabileceği kadar küçük ve hafif. Sabitlenecek bir yer, kurulacak bir ayak yok.</p>
+        <svg class="art" viewBox="0 0 150 200" aria-hidden="true">
+          <path d="M30 120c0-30 20-50 45-50s45 20 45 50v50H30z" fill="#5B7FAE" opacity=".92"/>
+          <rect x="58" y="40" width="34" height="62" rx="9" fill="#fff" stroke="#C9D8EA" stroke-width="2"/>
+          <rect x="64" y="48" width="22" height="30" rx="4" fill="#92E0FF"/>
+          <circle cx="75" cy="90" r="4" fill="#1D3557"/>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <span>Temiz Nokta — Temizlik personeli oda takip sistemi</span>
+    <span>Kolay kurulum, güvenilir veri aktarımı</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const SPEED = reduce ? 0.35 : 1; // slower, calmer pace if user prefers less motion
+
+  // Room layout: 3 top, 3 bottom. Card position = door edge on the corridor.
+  const rooms = [
+    {id:'101', x:40,  y:48,  w:180, h:112, top:true},
+    {id:'102', x:230, y:48,  w:180, h:112, top:true},
+    {id:'103', x:420, y:48,  w:180, h:112, top:true},
+    {id:'104', x:40,  y:300, w:180, h:112, top:false},
+    {id:'105', x:230, y:300, w:180, h:112, top:false},
+    {id:'106', x:420, y:300, w:180, h:112, top:false, metal:true}, // metal door: signal fails here
+  ];
+  const GW = {x:320,y:230};
+  const roomsG = document.getElementById('rooms');
+
+  rooms.forEach(r=>{
+    const cardX = r.x + r.w/2, cardY = r.top ? r.y + r.h + 4 : r.y - 4;
+    r.card = {x:cardX, y:cardY};
+    r.stand = {x:cardX, y: r.top ? r.y + r.h + 40 : r.y - 40};
+    r.inside = {x:cardX, y: r.y + r.h/2 + 4};
+    const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.innerHTML = `
+      <rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" rx="10" fill="#fff" stroke="#D6E6F7" stroke-width="2"/>
+      <rect x="${r.x+14}" y="${r.top ? r.y+16 : r.y+r.h-16-46}" width="60" height="46" rx="6" fill="#EAF3FF"/>
+      <rect x="${r.x+20}" y="${r.top ? r.y+20 : r.y+r.h-16-42}" width="48" height="18" rx="4" fill="#fff"/>
+      <rect x="${r.x+r.w-46}" y="${r.top ? r.y+18 : r.y+r.h-18-26}" width="30" height="26" rx="6" fill="#EAF3FF"/>
+      <text x="${r.x+r.w-14}" y="${r.top ? r.y+r.h-12 : r.y+22}" text-anchor="end" font-size="15" font-weight="800" fill="#163A63">${r.id}</text>
+      ${r.metal ? `<rect x="${cardX-34}" y="${cardY-3}" width="68" height="7" rx="2" fill="#8FA3AA"/>` : `<rect x="${cardX-30}" y="${cardY-2}" width="60" height="4" rx="2" fill="#D6E6F7"/>`}
+      <g class="card" id="card-${r.id}" transform="translate(${cardX+38},${cardY})">
+        <rect x="-8" y="-11" width="16" height="22" rx="3" fill="#fff" stroke="#1877F2" stroke-width="2"/>
+        <circle r="3" fill="#1877F2"/>
+      </g>`;
+    roomsG.appendChild(g);
+  });
+
+  const staff = document.getElementById('staff');
+  const sig = document.getElementById('sig');
+  const gwPulse = document.getElementById('gwPulse');
+  const feed = document.getElementById('feed');
+  const clockEl = document.getElementById('clock');
+  const clockSvg = document.getElementById('clockSvg');
+  const statusEl = document.getElementById('status');
+  const kCount = document.getElementById('kCount');
+  const battBar = document.getElementById('battBar');
+  const battTxt = document.getElementById('battTxt');
+  const metalHint = document.getElementById('metalHint');
+
+  const wait = ms => new Promise(r=>setTimeout(r, ms/SPEED));
+  const ease = t => t<.5 ? 2*t*t : -1+(4-2*t)*t;
+
+  function moveTo(from,to,dur){
+    return new Promise(res=>{
+      const t0 = performance.now(); dur = dur/SPEED;
+      (function f(now){
+        const k = Math.min(1,(now-t0)/dur), e = ease(k);
+        // travel via corridor: go to corridor y first, then x, then to stand point
+        const midY = 230;
+        let x,y;
+        if(k<.3){ const q=k/.3; x=from.x; y=from.y+(midY-from.y)*q; }
+        else if(k<.7){ const q=(k-.3)/.4; x=from.x+(to.x-from.x)*ease(q); y=midY; }
+        else { const q=(k-.7)/.3; x=to.x; y=midY+(to.y-midY)*q; }
+        staff.setAttribute('transform',`translate(${x},${y})`);
+        k<1 ? requestAnimationFrame(f) : res();
+      })(t0);
+    });
+  }
+
+  function svgEl(n,attrs){const e=document.createElementNS('http://www.w3.org/2000/svg',n);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+
+  function walk(from,to,dur){
+    return new Promise(res=>{const t0=performance.now();dur=dur/SPEED;(function f(now){const k=Math.min(1,(now-t0)/dur),e=ease(k);staff.setAttribute('transform',`translate(${from.x+(to.x-from.x)*e},${from.y+(to.y-from.y)*e})`);k<1?requestAnimationFrame(f):res();})(t0);});
+  }
+
+  async function tapFlash(r){
+    const card = document.getElementById('card-'+r.id);
+    const ring = svgEl('circle',{r:6,fill:'none',stroke:'#67AFFF','stroke-width':3,opacity:1});
+    card.appendChild(ring);
+    const t0=performance.now();
+    await new Promise(res=>{(function f(now){const k=Math.min(1,(now-t0)/(700/SPEED));ring.setAttribute('r',6+k*22);ring.setAttribute('opacity',1-k);k<1?requestAnimationFrame(f):res();})(t0);});
+    ring.remove();
+  }
+
+  async function beam(from, ok){
+    // expanding arcs + travelling dot towards receiver
+    const dot = svgEl('circle',{r:5,fill: ok?'#67AFFF':'#E9A83A'});
+    const line = svgEl('line',{x1:from.x,y1:from.y,x2:GW.x,y2:GW.y,stroke: ok?'#67AFFF':'#E9A83A','stroke-width':2,'stroke-dasharray':'3 6',opacity:.6});
+    sig.append(line,dot);
+    const t0=performance.now(); const dur=1100/SPEED; const stopAt = ok?1:.55;
+    await new Promise(res=>{(function f(now){
+      const k=Math.min(stopAt,(now-t0)/dur);
+      dot.setAttribute('cx',from.x+(GW.x-from.x)*k); dot.setAttribute('cy',from.y+(GW.y-from.y)*k);
+      // wave rings
+      if(Math.floor((now-t0)/(260/SPEED))!==Math.floor((now-t0-16)/(260/SPEED)) && k<stopAt){
+        const w=svgEl('circle',{cx:from.x,cy:from.y,r:8,fill:'none',stroke: ok?'#67AFFF':'#E9A83A','stroke-width':2});
+        sig.appendChild(w); const s=now;
+        (function g(n){const q=Math.min(1,(n-s)/(900/SPEED));w.setAttribute('r',8+q*46);w.setAttribute('opacity',(1-q)*.8);q<1?requestAnimationFrame(g):w.remove();})(now);
+      }
+      k<stopAt?requestAnimationFrame(f):res();
+    })(t0);});
+    if(!ok){ // fade out: signal blocked
+      let o=1; await new Promise(res=>{(function f(){o-=.06;dot.setAttribute('opacity',o);line.setAttribute('opacity',o*.6);o>0?requestAnimationFrame(f):res();})();});
+    }
+    dot.remove(); line.remove();
+  }
+
+  async function gwAck(){
+    const t0=performance.now();
+    await new Promise(res=>{(function f(now){const k=Math.min(1,(now-t0)/(700/SPEED));gwPulse.setAttribute('r',22+k*30);gwPulse.setAttribute('opacity',1-k);k<1?requestAnimationFrame(f):res();})(t0);});
+    gwPulse.setAttribute('opacity',0);
+  }
+
+  let count=0, batt=94, pending=[];
+  const rowsById = {};
+  function setClock(m){const h=String(Math.floor(m/60)).padStart(2,'0'), mm=String(m%60).padStart(2,'0');clockEl.textContent=clockSvg.textContent=h+':'+mm;}
+  function addRow(id,time,ok){
+    if(feed.querySelector('.empty')) feed.innerHTML='';
+    feed.querySelectorAll('.row.new').forEach(x=>x.classList.remove('new'));
+    const row=document.createElement('div'); row.className='row new';
+    row.innerHTML=`<span class="t">${time}</span><span class="r">Oda ${id}</span><span class="chip ${ok?'ok':'wait'}">${ok?'Teyit edildi':'Cihazda bekliyor'}</span>`;
+    feed.prepend(row); rowsById[id]=row;
+    while(feed.children.length>5) feed.lastChild.remove();
+  }
+  function markSent(id){const row=rowsById[id]; if(!row) return; const c=row.querySelector('.chip'); c.className='chip ok'; c.textContent='Teyit edildi'; row.classList.add('new');}
+  function timeStr(m){return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');}
+
+  async function run(){
+    while(true){
+      count=0; feed.innerHTML='<div class="empty">Henüz bildirim yok. Vardiya 09:00\'da başlıyor.</div>'; pending=[]; batt=94;
+      let minutes=9*60; setClock(minutes);
+      let pos={x:320,y:230}; staff.setAttribute('transform',`translate(${pos.x},${pos.y})`);
+      const order=[0,1,2,5,4,3];
+      for(const i of order){
+        const r=rooms[i];
+        statusEl.textContent='Odaya gidiliyor';
+        await moveTo(pos,r.stand,1600); pos=r.stand;
+        setClock(minutes);
+        // 1) tap  2) instant confirm
+        statusEl.textContent='Karta dokunuldu';
+        await tapFlash(r); await wait(250);
+        // 3) send  4) confirm  /  5) store if blocked
+        const ok = !r.metal;
+        if(!ok){ metalHint.setAttribute('opacity',1); }
+        statusEl.textContent = ok ? 'Merkeze gönderiliyor' : 'Sinyal geçmedi, cihazda saklandı';
+        await beam(r.card, ok);
+        if(ok){
+          await gwAck();
+          statusEl.textContent='Sunucu teyit etti';
+          count++; kCount.textContent=count+' oda';
+          addRow(r.id, timeStr(minutes), true);
+          // flush anything stored earlier, with its original time
+          if(pending.length){
+            await wait(700); statusEl.textContent='Bekleyen kayıt gönderildi';
+            for(const p of pending){ await beam(r.card,true); await gwAck(); markSent(p.id); count++; kCount.textContent=count+' oda'; }
+            pending=[];
+          }
+        }else{
+          addRow(r.id, timeStr(minutes), false); pending.push({id:r.id});
+          await wait(600); metalHint.setAttribute('opacity',0);
+        }
+        batt=Math.max(90, batt-0.5); battBar.style.setProperty('--lvl',batt+'%'); battTxt.textContent='%'+Math.round(batt);
+        // enter the room and clean
+        statusEl.textContent='Oda temizleniyor';
+        await walk(r.stand, r.inside, 900);
+        await wait(1500);
+        await walk(r.inside, r.stand, 900); pos=r.stand;
+        minutes+=30;
+      }
+      statusEl.textContent='Vardiya tamamlandı';
+      await moveTo(pos,{x:320,y:230},1600); pos={x:320,y:230};
+      await wait(2600);
+    }
+  }
+  run();
+})();
+</script>
+</body>
+</html>

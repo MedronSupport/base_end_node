@@ -110,7 +110,7 @@ STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her m
 - `docs/server-gelistirici-rehberi.md` — **sunucu geliştirici rehberi:** MQTT topic'leri, tüm uplink/downlink mesajlarının byte-seviyesi payload tabloları ve örnekleri, zaman senkron mekanizması, hata/red davranışları, buffer semantiği — kod referansı olmadan, saf protokol dokümantasyonu
 - `docs/test-plan-lora_app.md` — senaryo bazlı test planı (buffer, RFID/status ACK zincirleri, rejoin, LPM, zaman senkronu, refactor regresyonu)
 - `docs/Ürünleştirmeye Yönelik Eylem-Plani_UYGULANDI.md` — ürüne dönüşme yol haritası ve buradan çıkan somut eylem maddeleri (komut protokolü, boş basımda RX penceresi, STATUS interval komutu, buzzer/LED komutu, tarih aralığı sorgusu) — **tümü uygulandı** (madde 1-5 ✅); her madde için değişen dosyalar ve test önerileri; ayrıca üretime çıkmadan önce çözülmesi gereken kritik riskler (paylaşılan anahtar, RDP, OTA/provisioning eksikliği, vb.)
-- `docs/LW_RFID_infografik.html` — ürünün çalışma prensibini özetleyen HTML infografik
+- `docs/temiz_nokta_infografik.html` — ürünün çalışma prensibini özetleyen, canlı SVG benzetimli HTML infografik (tarayıcıda açılarak görüntülenir — bkz. aşağıdaki not)
 
 **`docs/Hardware/`** — donanım referansları: BOM (`LOW_POWER_RFID_BOM.xlsx`), MFRC522/BC337/BS250P/NDS7002A-D datasheet'leri, güç tüketim ölçüm fotoğrafı (`power_test_lwrfid.png` — bkz. Güç Tüketim Testi bölümü)
 
