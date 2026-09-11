@@ -190,6 +190,27 @@ typedef enum
  * sabit degildir. 0 eslesme durumunda tek, kayitsiz bir header mesaji
  * ([2]=0,[3]=0) gonderilir - sunucu sessizce beklemesin diye. */
 #define LORA_RFID_MSG_TYPE_QUERY_RESULT	 0x46
+
+/* STATUS mesaj araligini uzaktan degistirme komutu, 4 byte:
+ *   [0]=0x02 [1]=0x03 [2:4]=carpan (buyuk-endian, uint16)
+ * Gercek aralik = carpan * 30 sn. Carpan 2 byte'lik tel formatini kucuk
+ * tutmak icin secildi (4 byte ham saniye yerine) - RTC yedek register'i
+ * (32-bit) bunun icin bir sinir degil, sadece daha kompakt bir payload.
+ *
+ * Sinirlar: carpan [1, 2880] araliginda olmali (1=30 sn, 2880=24 saat).
+ * Bu aralik disindaki (0 dahil) HER deger REDDEDILIR - kirpma YAPILMAZ,
+ * mevcut ayar degismeden kalir, sadece UART'a loglanir (sessiz basarisizlik
+ * yerine seffaf red - operatorun "ne istedimse o oldu sandim ama sessizce
+ * baska bir degere sabitlendi" seklinde yaniltilmamasi icin).
+ *
+ * Kalicilik: carpan degeri (saniyeye cevrilmis hali degil, DOGRUDAN carpan)
+ * bir RTC yedek register'inda (bkz lora_app.c STATUS_INTERVAL_BKP_REG)
+ * saklanir - watchdog/yazilimsal reset'lerde korunur. Acilista register
+ * [1,2880] araliginda degilse (ilk acilista fabrika sifiri oldugu icin
+ * otomatik gecersiz sayilir - ayri bir "ayarlandi mi" bayragina gerek
+ * yok) varsayilan STATUS_INTERVAL_MULTIPLIER_DEFAULT (120 = 1 saat)
+ * kullanilir. */
+#define LORA_CMD_ID_SET_STATUS_INTERVAL	 0x03U
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/

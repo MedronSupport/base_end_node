@@ -43,6 +43,7 @@
 #include "persistent_circular_buffer.h"
 #include "adc_bat_meas.h"
 #include "lora_timesync.h"
+#include "rtc.h"
 #include <stdlib.h>
 /* USER CODE END Includes */
 
@@ -55,6 +56,9 @@
 extern SPI_HandleTypeDef hspi2;
 extern  pcb_handle_t eventBuffer;
 extern  uint16_t lastRecordId;
+/* RTC handle - lora_timesync.c ile ayni global handle'i paylasir, STATUS
+ * araligi carpanini RTC yedek register'inda kalici tutmak icin. */
+extern RTC_HandleTypeDef hrtc;
 /* USER CODE END EV */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -254,6 +258,8 @@ static void BuzzerLedToggleHandler(void);
 static bool LoraCommand_HandleDownlink(const uint8_t *buffer, uint8_t size);
 static uint16_t GetMaxAppPayloadForCurrentDR(void);
 static void SendQueryBatchHandler(void);
+static uint32_t StatusIntervalMultiplierToMs(uint16_t multiplier);
+static uint16_t LoadPersistedStatusIntervalMultiplier(void);
 static void SendBufferedRfidLogHandler(void);
 static void BufferAckTimeoutHandler(void);
 /* Yedi ayri "timer ates alinca sadece bir sequencer task'i tetikle"
@@ -345,6 +351,17 @@ static UTIL_TIMER_Object_t RetryStatusTimer;
 static UTIL_TIMER_Time_t RFID_TIMEOUT = MFRC_RFID_READ_TIMEOUT;
 static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 3600000;
 static UTIL_TIMER_Time_t RETRY_STATUS_TIMEOUT= 15000;
+
+/* STATUS mesaj araligini uzaktan degistirme komutu - bkz docs/eylem-plani.md
+ * madde 3, lora_app.h LORA_CMD_ID_SET_STATUS_INTERVAL basligi. Carpan
+ * (saniyeye cevrilmis hali degil, DOGRUDAN carpan) kalici olarak RTC yedek
+ * register'inda saklanir - watchdog/yazilimsal reset'lerde korunur, sadece
+ * gercek guc kaybinda sifirlanir. */
+#define STATUS_INTERVAL_BKP_REG            RTC_BKP_DR4
+#define STATUS_INTERVAL_MULTIPLIER_UNIT_S  30U
+#define STATUS_INTERVAL_MULTIPLIER_MIN     1U
+#define STATUS_INTERVAL_MULTIPLIER_MAX     2880U   /* 2880*30 sn = 24 saat */
+#define STATUS_INTERVAL_MULTIPLIER_DEFAULT 120U    /* 120*30 sn = 3600 sn = 1 saat */
 /* Buffer'dan bir kayit gonderilip ACK alindiktan sonra, bir sonraki kaydin
  * gonderilmesinden once beklenecek sure. Onceden ACK gelir gelmez hemen bir
  * sonraki kayit ard arda (aralarinda ~1 sn'den az) gonderiliyordu - bu, ACK
@@ -589,7 +606,8 @@ void LoRaWAN_Init(void)
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_SendBufferedRFIDEvent), UTIL_SEQ_RFU, SendBufferedRfidLogHandler);
   UTIL_TIMER_Create(&BufferedDrainDelayTimer, BUFFERED_DRAIN_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kBufferedDrainBinding);
 
-  //status message timer
+  //status message timer - araligi RTC yedek register'indan (varsa) kalici olarak yukle
+  STATUS_MSG_TIMEOUT = StatusIntervalMultiplierToMs(LoadPersistedStatusIntervalMultiplier());
   UTIL_TIMER_Create(&StatusMessageTimeoutTimer, STATUS_MSG_TIMEOUT, UTIL_TIMER_PERIODIC, OnTimerFiresSetTask, (void *)&kStatusMsgBinding);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_StatusMSGEvent), UTIL_SEQ_RFU, OnStatusMessageHandler);
 
@@ -1010,6 +1028,47 @@ static bool LoraCommand_HandleDownlink(const uint8_t *buffer, uint8_t size)
 		return true;
 	}
 
+	if (cmdId == LORA_CMD_ID_SET_STATUS_INTERVAL)
+	{
+		if (size != 4U)
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "###### Status araligi komutu gecersiz boyut (%d)\r\n", size);
+			return true;
+		}
+
+		uint16_t multiplier = (uint16_t)(((uint16_t)buffer[2] << 8) | (uint16_t)buffer[3]);
+
+		if ((multiplier < STATUS_INTERVAL_MULTIPLIER_MIN) || (multiplier > STATUS_INTERVAL_MULTIPLIER_MAX))
+		{
+			/* KASITLI: kirpma YOK, sessizce sinira cekmek yerine acikca
+			 * reddediyoruz - mevcut ayar degismeden kalir. */
+			APP_LOG(TS_OFF, VLEVEL_M,
+					"###### Status araligi komutu REDDEDILDI: carpan=%u gecersiz (izin verilen [%u,%u]), mevcut ayar korunuyor\r\n",
+					multiplier, STATUS_INTERVAL_MULTIPLIER_MIN, STATUS_INTERVAL_MULTIPLIER_MAX);
+			return true;
+		}
+
+		uint32_t newIntervalMs = StatusIntervalMultiplierToMs(multiplier);
+
+		/* Calisan periyodik timer'i yeni periyotla yeniden kur - buzzer/led
+		 * komutunda kanitlanmis desen (Stop -> Create(yeni periyot) -> Start).
+		 * Bir sonraki STATUS, bu andan itibaren yeni sure kadar sonra gelir. */
+		UTIL_TIMER_Stop(&StatusMessageTimeoutTimer);
+		UTIL_TIMER_Create(&StatusMessageTimeoutTimer, newIntervalMs, UTIL_TIMER_PERIODIC,
+				OnTimerFiresSetTask, (void *)&kStatusMsgBinding);
+		UTIL_TIMER_Start(&StatusMessageTimeoutTimer);
+		STATUS_MSG_TIMEOUT = newIntervalMs;
+
+		/* Kalicilik: watchdog/yazilimsal reset sonrasi da bu ayar korunsun. */
+		HAL_RTCEx_BKUPWrite(&hrtc, STATUS_INTERVAL_BKP_REG, multiplier);
+
+		APP_LOG(TS_OFF, VLEVEL_M,
+				"###### Status araligi degistirildi: carpan=%u -> %u sn (%u ms), kalici olarak yazildi\r\n",
+				multiplier, (unsigned int)(newIntervalMs / 1000U), (unsigned int)newIntervalMs);
+
+		return true;
+	}
+
 	APP_LOG(TS_OFF, VLEVEL_M, "###### Bilinmeyen komut ID: 0x%02X\r\n", cmdId);
 	return true;
 }
@@ -1126,6 +1185,34 @@ static void SendQueryBatchHandler(void)
 		APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu raporu tamamlandi (%u kayit, %u batch)\r\n",
 				(unsigned int)g_queryMatchCount, g_queryBatchIndex);
 	}
+}
+
+/**
+  * @brief  30 sn'lik birim carpanini gercek milisaniye periyoduna cevirir.
+  *         Tel/kalici depolama formati hep CARPAN (30 sn birimi), UTIL_TIMER
+  *         ise ms bekledigi icin bu tek noktada donusum yapiliyor.
+  */
+static uint32_t StatusIntervalMultiplierToMs(uint16_t multiplier)
+{
+	return (uint32_t)multiplier * STATUS_INTERVAL_MULTIPLIER_UNIT_S * 1000UL;
+}
+
+/**
+  * @brief  RTC yedek register'inda saklanan STATUS araligi carpanini okur.
+  *         Register [STATUS_INTERVAL_MULTIPLIER_MIN, ..._MAX] araliginda
+  *         GECERLI bir deger tasimiyorsa (ilk acilista fabrika sifiri
+  *         oldugu icin bu otomatik olarak gecerlidir - ayri bir "ayarlandi
+  *         mi" bayragina gerek yok) varsayilan doner.
+  */
+static uint16_t LoadPersistedStatusIntervalMultiplier(void)
+{
+	uint32_t stored = HAL_RTCEx_BKUPRead(&hrtc, STATUS_INTERVAL_BKP_REG);
+
+	if ((stored < STATUS_INTERVAL_MULTIPLIER_MIN) || (stored > STATUS_INTERVAL_MULTIPLIER_MAX))
+	{
+		return (uint16_t)STATUS_INTERVAL_MULTIPLIER_DEFAULT;
+	}
+	return (uint16_t)stored;
 }
 
 static void RfidPreventStopMode(void)

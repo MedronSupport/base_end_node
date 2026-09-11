@@ -59,6 +59,16 @@ MAX_BUZZER_LED_DURATION_S = 180
 # duyarli batch mesajla (~10 sn arayla) geri raporlar.
 LORA_CMD_ID_QUERY_BY_DATE = 0x02
 
+# STATUS mesaj araligini degistirme komutu (bkz lora_app.h
+# LORA_CMD_ID_SET_STATUS_INTERVAL). Gercek aralik = carpan * 30 sn.
+# Cihaz [MIN,MAX] disindaki HER degeri REDDEDER (kirpma yok) - sunucu
+# tarafinda da ayni sinirlarla on-dogrulama yapiyoruz, bosuna reddedilecek
+# bir komut gondermeyelim diye.
+LORA_CMD_ID_SET_STATUS_INTERVAL = 0x03
+STATUS_INTERVAL_MULTIPLIER_UNIT_S = 30
+STATUS_INTERVAL_MULTIPLIER_MIN = 1
+STATUS_INTERVAL_MULTIPLIER_MAX = 2880  # 24 saat
+
 # En son gorulen cihazin DevEUI'si - interaktif komutlarda deveui elle
 # yazmaya gerek kalmasin diye.
 last_seen_dev_eui = None
@@ -116,6 +126,52 @@ def send_query_by_date_command(client, dev_eui, start_ts, end_ts, confirmed=Fals
     print(f"   payload_hex={payload_bytes.hex().upper()}")
     print("   (Cihaz eslesen kayitlari coklu batch mesajla, ~10 sn arayla geri gonderecek - "
           "her batch icin ayrica bir uplink firsati (buton basimi/status) gerekir.)")
+
+
+def send_set_status_interval_command(client, dev_eui, interval_seconds, confirmed=False):
+    """Cihazin STATUS mesaj araligini degistirir:
+    [0]=0x02 (LORA_COMMAND_DOWNLINK_TYPE)
+    [1]=0x03 (LORA_CMD_ID_SET_STATUS_INTERVAL)
+    [2:4]=carpan, buyuk-endian (uint16) - gercek aralik = carpan * 30 sn
+
+    interval_seconds: istenen aralik (saniye). 30'un tam kati degilse en
+    yakin katina yuvarlanir (kullaniciya bildirilir). Cihazin izin verdigi
+    [30 sn, 24 saat] araliginin disinda kalirsa komut HIC GONDERILMEZ -
+    cihaz zaten reddedecegi icin bosuna bir downlink/RX firsati harcamayalim
+    (sunucu tarafinda da ayni sinirlarla on-dogrulama)."""
+    if not dev_eui or dev_eui == "Bilinmiyor":
+        print("⚠️  DevEUI bilinmiyor, komut gonderilemedi.")
+        return
+
+    multiplier = round(interval_seconds / STATUS_INTERVAL_MULTIPLIER_UNIT_S)
+    rounded_seconds = multiplier * STATUS_INTERVAL_MULTIPLIER_UNIT_S
+    if rounded_seconds != interval_seconds:
+        print(f"ℹ️  {interval_seconds} sn, 30'un katı değil - en yakın değere ({rounded_seconds} sn) yuvarlandı.")
+
+    if not (STATUS_INTERVAL_MULTIPLIER_MIN <= multiplier <= STATUS_INTERVAL_MULTIPLIER_MAX):
+        min_s = STATUS_INTERVAL_MULTIPLIER_MIN * STATUS_INTERVAL_MULTIPLIER_UNIT_S
+        max_s = STATUS_INTERVAL_MULTIPLIER_MAX * STATUS_INTERVAL_MULTIPLIER_UNIT_S
+        print(f"⚠️  Geçersiz aralık: {rounded_seconds} sn, izin verilen [{min_s}, {max_s}] sn dışında - "
+              "komut gönderilmedi (cihaz zaten reddedecekti).")
+        return
+
+    payload_bytes = (bytes([LORA_COMMAND_DOWNLINK_TYPE, LORA_CMD_ID_SET_STATUS_INTERVAL])
+                      + struct.pack(">H", multiplier))
+    payload_b64 = base64.b64encode(payload_bytes).decode("ascii")
+
+    downlink_msg = {
+        "confirmed": confirmed,
+        "fPort": DOWNLINK_FPORT,
+        "data": payload_b64,
+    }
+
+    topic = MQTT_DOWNLINK_TOPIC_FMT.format(deveui=dev_eui)
+    client.publish(topic, json.dumps(downlink_msg))
+    print(f"⏱️  STATUS aralığı komutu kuyruğa alındı -> {topic}")
+    print(f"   çarpan={multiplier}  ->  {rounded_seconds} sn (~{rounded_seconds / 3600:.2f} saat)")
+    print(f"   payload_hex={payload_bytes.hex().upper()}")
+    print("   (Cihazda hemen uygulanır ve RTC yedek register'ında kalıcı olarak saklanır - "
+          "watchdog/yazılımsal reset sonrası da korunur.)")
 
 
 def send_buzzer_led_command(client, dev_eui, target=1, pattern=1, duration_s=5, confirmed=False):
@@ -465,6 +521,23 @@ def _print_downlink_format_banner():
     print("   ~10 sn arayla, DR'ye gore o an kac kayit sigiyorsa o kadar gelir.)")
     print("=" * 60)
 
+    ornek5 = bytes([LORA_COMMAND_DOWNLINK_TYPE, LORA_CMD_ID_SET_STATUS_INTERVAL]) + struct.pack(">H", 120)
+    print("\nSTATUS ARALIĞI DEĞİŞTİRME KOMUTU (4 byte):")
+    print("  byte[0]  = 0x02               <- mesaj kategorisi: KOMUT (sabit)")
+    print("  byte[1]  = 0x03               <- komut ID: status aralığı (sabit)")
+    print("  byte[2:4]= carpan             <- buyuk-endian (MSB once), uint16, GERCEK ARALIK = carpan*30 sn")
+    print(f"  Sinirlar: carpan [1, {STATUS_INTERVAL_MULTIPLIER_MAX}] (30 sn - 24 saat). Disindaki HER deger "
+          "cihaz tarafinda REDDEDILIR (kirpma yok), mevcut ayar degismez.")
+    print("-" * 60)
+    print(f"  interval 3600     (1 saat - carpan=120)")
+    print(f"    -> hex: {ornek5.hex(' ').upper()}")
+    print(f"       [02]=komut [03]=status araligi [00 78]=carpan 120 (120*30=3600 sn)")
+    print("  interval 300      (5 dakika - carpan=10)")
+    print("  interval 90000    (25 saat - REDDEDILECEK, 24 saatlik siniri asiyor)")
+    print("  (Kabul edilirse cihaz hemen uygular VE RTC yedek register'inda kalici olarak")
+    print("   saklar - watchdog/yazilimsal reset sonrasi da korunur.)")
+    print("=" * 60)
+
 
 def _print_command_help():
     _print_downlink_format_banner()
@@ -479,6 +552,10 @@ def _print_command_help():
     print("      start/end: epoch (sayi) ya da 'YYYY-MM-DD' (tek kelime, bosluksuz)")
     print("      orn. 'query 1725100800 1725200800' ya da 'query 2026-09-01 2026-09-02'")
     print("      Sonuclar 0x46 (QUERY_RESULT) tipinde, coklu batch halinde ~10 sn arayla gelir.")
+    print("  interval <saniye>")
+    print(f"      STATUS mesaj araligini degistirir. Izin verilen: [{STATUS_INTERVAL_MULTIPLIER_UNIT_S}, "
+          f"{STATUS_INTERVAL_MULTIPLIER_MAX * STATUS_INTERVAL_MULTIPLIER_UNIT_S}] sn (30 sn - 24 saat). "
+          "30'un katı değilse en yakına yuvarlanır.")
     print("  deveui <deveui>   -> son gorulen DevEUI'yi elle ayarlar")
     print("  help              -> bu mesaji tekrar goster")
     print("  exit              -> cikis\n")
@@ -541,6 +618,20 @@ def _command_input_loop():
                 print(f"⚠️  {e}")
                 continue
             send_query_by_date_command(client, last_seen_dev_eui, start_ts, end_ts)
+        elif cmd == "interval":
+            if not last_seen_dev_eui:
+                print("⚠️  Henuz bir DevEUI gorulmedi/ayarlanmadi - once bir cihaz mesaji bekle "
+                      "ya da 'deveui <deveui>' ile elle ayarla.")
+                continue
+            if len(parts) < 2:
+                print("Kullanim: interval <saniye>")
+                continue
+            try:
+                interval_seconds = int(parts[1])
+            except ValueError:
+                print("⚠️  Saniye bir tamsayı olmalı. Kullanim: interval <saniye>")
+                continue
+            send_set_status_interval_command(client, last_seen_dev_eui, interval_seconds)
         else:
             print(f"⚠️  Bilinmeyen komut: {cmd} ('help' yaz)")
 

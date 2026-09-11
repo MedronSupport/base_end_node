@@ -42,23 +42,20 @@ Bu dosya, `docs/urun-yol-haritasi.md`'deki tartışmadan çıkan somut adımlar�
 
 ---
 
-## 3. Uzaktan komutla STATUS mesaj aralığını değiştirme (RTC yedek register'da kalıcı)
+## 3. Uzaktan komutla STATUS mesaj aralığını değiştirme (RTC yedek register'da kalıcı) — ✅ UYGULANDI (2026-09-11)
 
 **Amaç:** Sunucudan bir komutla `STATUS_MSG_TIMEOUT`'u dinamik olarak değiştirebilmek, ve bu değeri reset'ler arası koruyabilmek.
 
-**Teknik notlar:**
-- Bu, `docs/urun-yol-haritasi.md` madde 1'deki (genel komut protokolü) ÖN KOŞULU — önce komut kanalı olmalı, sonra bu komut o kanaldan gelir.
-- `StatusMessageTimeoutTimer` şu an `UTIL_TIMER_PERIODIC` olarak SADECE oluşturulma anında verilen periyotla çalışıyor (`lora_app.c:538`). Çalışırken periyodunu değiştirmek için `UTIL_TIMER` API'sinde bunu destekleyen bir fonksiyon var mı (`UTIL_TIMER_SetPeriod` benzeri) yoksa timer'ı `Stop` edip yeni `ReloadValue` ile yeniden `Create`/`Start` etmek mi gerekiyor — **doğrulanmalı**.
-- Kalıcılık için `lora_timesync`'in kullandığı desenle aynı şekilde bir RTC yedek register'ı (örn. `RTC_BKP_DR4`, DR0-DR3 zaten kullanımda) kullanılabilir.
-- **Güvenlik/sağlamlık sınırı şart:** komutla gelen değere min/max sınır konmalı (örn. 5 dk - 24 saat arası) — yoksa hatalı/kötü niyetli bir komut cihazı ya sürekli uplink göndererek pil tüketimine ("DoS") ya da hiç status göndermeyecek kadar seyrekleştirmeye zorlayabilir.
+**Uygulanan tasarım:**
+- **Komut** (`LORA_CMD_ID_SET_STATUS_INTERVAL=0x03`, 4 byte): `[0]=0x02 [1]=0x03 [2:4]=carpan (2 byte, büyük-endian)`. Gerçek aralık = **çarpan × 30 sn** — çarpan yaklaşımı hem payload'ı küçültüyor (4 byte ham saniye yerine 2 byte) hem de "ondalıklı/kesirli değer" sınıfını yapısal olarak imkânsız kılıyor (tamsayı alan).
+- **Sınırlar:** çarpan `[1, 2880]` (30 sn - 24 saat). Aralık dışı HER değer (0 dahil) **reddedilir** — kırpma yok, mevcut ayar değişmeden kalır, sadece UART'a loglanır.
+- **`UTIL_TIMER` azami süre kontrolü — uygulamadan önce doğrulandı:** `timer_if.c`'deki gerçek dönüşüm formülü (`RTC_N_PREDIV_S=10`, 1024 tik/sn) ile hesaplandı — 24 saat ≈ 88,47 milyon tik, `uint32_t` sınırının (~4,29 milyar) sadece %2'si; gerçek azami temsil edilebilir süre ~48,5 gün. 24 saatlik sınır bu tavandan ~48 kat uzakta, taşma riski yok.
+- **Çalışma zamanı uygulama:** Buzzer komutunda kanıtlanmış desen — `UTIL_TIMER_Stop(&StatusMessageTimeoutTimer)` → `UTIL_TIMER_Create` (yeni periyot) → `UTIL_TIMER_Start`. Bir sonraki STATUS, komutun geldiği andan itibaren yeni süre kadar sonra gelir.
+- **Kalıcılık:** Çarpan değeri (saniyeye çevrilmiş hali değil, doğrudan çarpan) **RTC yedek register DR4**'e yazılıyor (DR0-DR3 zaten kullanımda, DR4'ün boş olduğu grep ile doğrulandı). Açılışta DR4 okunur; `[1,2880]` aralığında değilse (ilk açılışta fabrika sıfırı olduğu için otomatik geçersiz) varsayılan **120** (=1 saat) kullanılır — ayrı bir "ayarlandı mı" bayrağına gerek kalmadı.
 
-**Yapılacaklar:**
-- [ ] `UTIL_TIMER` API'sinde çalışan bir periyodik timer'ın periyodunu değiştirme yolunu doğrula.
-- [ ] Yeni RTC yedek register'ı ayır, `lora_timesync` deseniyle tutarlı bir modül/fonksiyon tasarla.
-- [ ] Min/max sınırları belirle.
-- [ ] Madde 1 (komut protokolü) tamamlanınca komut ID'si ata.
+**Değişen dosyalar:** `LoRaWAN/App/lora_app.h` (yeni komut sabiti), `LoRaWAN/App/lora_app.c` (`rtc.h`/`hrtc` eklendi, 4 sabit, 2 yardımcı fonksiyon, komut dispatch dalı, `LoRaWAN_Init()`'te kalıcı değeri yükleme), `docs/test_codes/lw_lora_rif_decoder.py` (`interval` komutu — sunucu tarafında da aynı sınırlarla ön-doğrulama yapıp geçersiz komutu hiç göndermiyor).
 
-**Durum:** Madde 1'in (genel komut kanalı) tamamlanmasını bekliyor.
+**Test edilmesi gereken:** `interval 3600` gibi geçerli bir değer gönderip loglarda `"Status araligi degistirildi: carpan=120 -> 3600 sn"` satırını doğrula; ardından cihazı resetleyip (watchdog ya da manuel) STATUS turlarının hâlâ yeni aralıkta geldiğini teyit et (kalıcılık testi). `interval 90000` gibi sınır dışı bir değer de göndererek `"REDDEDILDI"` logunu ve mevcut ayarın değişmediğini doğrula.
 
 ---
 
@@ -103,6 +100,6 @@ Bu dosya, `docs/urun-yol-haritasi.md`'deki tartışmadan çıkan somut adımlar�
 
 ## Genel Durum
 
-Madde 1, 2, 4, 5 **uygulandı**. Geriye sadece **madde 3** (STATUS mesaj aralığını uzaktan değiştirme) kaldı — genel komut protokolü (`LORA_COMMAND_DOWNLINK_TYPE`, `LoraCommand_HandleDownlink`) madde 4/5 ile birlikte zaten kuruldu, madde 3 bunun üzerine yeni bir komut ID (`LORA_CMD_ID_*`) eklemekten ibaret; `UTIL_TIMER` API'sinin çalışan bir periyodik timer'ın periyodunu değiştirme yolu (`Stop`+`Create`(yeni periyot)+`Start`) `BuzzerLedSafetyTimer`'da zaten doğrulandı, aynı desen `StatusMessageTimeoutTimer` için de kullanılabilir.
+**Madde 1, 2, 3, 4, 5 — hepsi uygulandı.** Genel komut protokolü (`LORA_COMMAND_DOWNLINK_TYPE=0x02`, `LoraCommand_HandleDownlink()`) artık 3 komutu destekliyor: `0x01` buzzer/LED, `0x02` tarih aralığı sorgusu, `0x03` STATUS aralığı değiştirme. Python test script'i (`docs/test_codes/lw_lora_rif_decoder.py`) her üçü için de interaktif komutlar (`buzzer`, `query`, `interval`) ve karşılık gelen uplink çözümleme desteği içeriyor.
 
 > **Not:** Flash yazım sıklığını azaltma (pcb_sync) maddesi bilerek bu plandan çıkarıldı — şimdilik üzerinde değişiklik yapılmayacak.
