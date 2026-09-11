@@ -13,7 +13,7 @@ STM32WL tabanlı, RFID kart okuyup LoRaWAN üzerinden sunucuya ileten, düşük 
 
 Klasik CubeMX iskeleti + kooperatif, run-to-completion bir sequencer (`Utilities/sequencer`, `UTIL_SEQ_*`) üzerine kurulu — RTOS yok. `main.c`'deki tek süperdöngü `MX_LoRaWAN_Process()` üzerinden sequencer'ı sürüyor; sequencer boşta kaldığında düşük güç yöneticisi (`Utilities/lpm`, `Core/Src/stm32_lpm_if.c`) cihazı **Stop2** moduna sokuyor.
 
-Uygulama mantığının tamamı `LoRaWAN/App/lora_app.c`'de: RFID okuma tetikleyicisi (buton/GPIO wake-up), LoRaWAN gönderim/ACK/retry zincirleri, saatlik durum (STATUS) mesajı, otomatik rejoin.
+Uygulama mantığının tamamı `LoRaWAN/App/lora_app.c`'de: RFID okuma tetikleyicisi (buton/GPIO wake-up), LoRaWAN gönderim/ACK/retry zincirleri, periyodik durum (STATUS) mesajı, otomatik rejoin, sunucudan gelen genel komut protokolü (zaman senkronu, buzzer/LED, tarih aralığı sorgusu, STATUS aralığı değişikliği).
 
 CubeMX'in dokunmadığı, projeye özel her şey **`external_libs/`** altında kendi `Inc/`+`Src/` klasörleriyle tutulur — bu sayede CubeMX ile kod yeniden üretimi (regenerate) bu modülleri asla etkilemez:
 
@@ -28,9 +28,9 @@ CubeMX'in dokunmadığı, projeye özel her şey **`external_libs/`** altında k
 
 ## LoRaWAN Payload Formatları
 
-Tüm mesajlar `LORAWAN_USER_APP_PORT` (2) üzerinden, `Buffer[0]` = uplink counter, `Buffer[1]` = mesaj tipi ile başlar. Çok baytlı sayısal alanlar **big-endian**.
+Tüm mesajlar `LORAWAN_USER_APP_PORT` (2) üzerinden, uplink'lerde `Buffer[0]` = uplink counter, `Buffer[1]` = mesaj tipi ile başlar. Çok baytlı sayısal alanlar **big-endian**. Tam byte-seviyesi tablolar, örnek payload'lar ve sunucu tarafı davranış kuralları (hata/red senaryoları, retry, MQTT topic'leri dahil) için bkz. **`docs/server-gelistirici-rehberi.md`** — burada sadece özet veriliyor.
 
-**Canlı RFID okuma** (`LORA_RFID_MSG_TYPE_LIVE_UID = 0x45`, 18 byte) ve **buffer'dan tekrar gönderim** — aynı format:
+**Canlı RFID okuma** (`LORA_RFID_MSG_TYPE_LIVE_UID = 0x45`, 18 byte) ve **buffer'dan tekrar gönderim** — aynı format, confirmed:
 | Byte | Alan |
 |---|---|
 | 0 | uplink counter |
@@ -40,7 +40,7 @@ Tüm mesajlar `LORAWAN_USER_APP_PORT` (2) üzerinden, `Buffer[0]` = uplink count
 | 7:13 | UID (7 byte, kullanılmayan baytlar 0x00) |
 | 14:17 | gönderim anındaki güncel epoch tahmini (retry'lerde [2:5]'ten farklı olabilir) |
 
-**Durum (STATUS) mesajı** (`LORA_RFID_MSG_TYPE_STATUS = 0x27`, 14 byte, saatlik + retry):
+**Durum (STATUS) mesajı** (`LORA_RFID_MSG_TYPE_STATUS = 0x27`, 14 byte, confirmed — varsayılan periyot 1 saat, uzaktan komutla ayarlanabilir):
 | Byte | Alan |
 |---|---|
 | 0 | uplink counter |
@@ -50,14 +50,32 @@ Tüm mesajlar `LORAWAN_USER_APP_PORT` (2) üzerinden, `Buffer[0]` = uplink count
 | 6:9 | status sayacı — sunucunun zaman senkron yanıtında **aynen** geri göndermesi gereken tazelik anahtarı |
 | 10:13 | gönderim anındaki güncel epoch tahmini |
 
-**Zaman senkron downlink'i** (sunucudan cihaza, `LORA_TIMESYNC_DOWNLINK_TYPE = 0x01`, 9 byte — bkz. `external_libs/lora_app_auxilary/Inc/lora_timesync.h`):
+**IND ping** (`LORA_RFID_MSG_TYPE_IND = 0x22`, 6 byte, unconfirmed): veri taşımayan, ek bir RX penceresi açmak için gönderilen yoklama mesajı. Bir STATUS'un ACK sonucu belli olduktan ~3 sn sonra ve boş kalan (kart bulunamayan) bir okuma denemesinin ardından tetiklenir — sunucunun kuyrukladığı bir downlink'e (zaman senkronu, komut) ekstra teslim fırsatı sağlar.
+| Byte | Alan |
+|---|---|
+| 0 | uplink counter |
+| 1 | tip (0x22) |
+| 2:5 | gönderim anındaki epoch |
+
+**Tarih aralığı sorgu sonucu** (`LORA_RFID_MSG_TYPE_QUERY_RESULT = 0x46`, değişken uzunluk, unconfirmed, çoklu batch): bir sorgu komutuna (aşağıda) yanıt olarak, radyo veri hızına (DR) göre dinamik boyutlu batch'ler halinde gönderilir. Header (6 byte: counter, tip, bu mesajdaki kayıt sayısı, o ana kadarki toplam, batch index, kırpıldı-mı bayrağı) + ardışık TLV kayıt blokları (`[uuid_uzunluk][uuid][timestamp]`). Detay: `LoRaWAN/App/lora_app.h`.
+
+**Zaman senkron downlink'i** (sunucudan cihaza, tip `0x01`, 9 byte — bkz. `external_libs/lora_app_auxilary/Inc/lora_timesync.h`):
 | Byte | Alan |
 |---|---|
 | 0 | tip (0x01) |
 | 1:4 | Unix epoch (sn) |
 | 5:8 | sunucunun bu yanıtı hesapladığı andaki status sayacı |
 
-Cihaz, gelen sayacı kendi son gönderdiği status sayacıyla **birebir eşleşmiyorsa** yanıtı sessizce reddeder (gecikmiş/stale downlink koruması) — bkz. `lora_timesync.c`.
+Cihaz, gelen sayacı kendi son gönderdiği status sayacıyla **birebir eşleşmiyorsa** ya da taşınan zaman izin verilen toleranstan fazla geriye sıçratıyorsa yanıtı sessizce reddeder (gecikmiş/stale downlink koruması, ölçeklenmiş tolerans) — bkz. `lora_timesync.c`.
+
+**Genel komut downlink'i** (sunucudan cihaza, tip `LORA_COMMAND_DOWNLINK_TYPE = 0x02`, `Buffer[1]` = komut ID): tek bir dispatch mekanizması altında üç komut tanımlı — bkz. `LoRaWAN/App/lora_app.h` ve `docs/server-gelistirici-rehberi.md` bölüm 5.2:
+| Komut ID | İsim | Boyut | Özet |
+|---|---|---|---|
+| `0x01` | Buzzer/LED | 6 byte | Sesli/görsel uyarıyı uzaktan tetikler (kayıp cihaz bulma); süre saniye cinsinden, cihaz tarafında azami 3 dakikaya sessizce kırpılır |
+| `0x02` | Tarih aralığı sorgusu | 10 byte | Kalıcı bellekteki, verilen `[start,end]` epoch aralığına giren tüm kayıtları `0x46` ile geri raporlatır |
+| `0x03` | STATUS aralığı değişikliği | 4 byte | Periyodik STATUS gönderim sıklığını uzaktan ayarlar (30 sn – 24 saat arası, 30 sn'lik çarpanlarla); RTC yedek register'ında (`RTC_BKP_DR4`) kalıcı |
+
+Geçersiz parametreli komutlar (aralık dışı çarpan, start>end, çakışan sorgu) **sessizce reddedilir** — cihaz hiçbir hata uplink'i göndermez, sadece UART logu tutar.
 
 ## Güç Yönetimi ve Watchdog
 
@@ -86,9 +104,10 @@ STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her m
 
 ## Dokümanlar
 
+- `docs/server-gelistirici-rehberi.md` — **sunucu geliştirici rehberi:** MQTT topic'leri, tüm uplink/downlink mesajlarının byte-seviyesi payload tabloları ve örnekleri, zaman senkron mekanizması, hata/red davranışları, buffer semantiği — kod referansı olmadan, saf protokol dokümantasyonu
 - `docs/test-plan-lora_app.md` — senaryo bazlı test planı (buffer, RFID/status ACK zincirleri, rejoin, LPM, zaman senkronu, refactor regresyonu)
-- `docs/urun-yol-haritasi.md` — ürüne dönüşme yol haritası: sunucudan komut alma eksikliği, STATUS parçalama analizi, üretime çıkmadan önce çözülmesi gereken kritik riskler (paylaşılan anahtar, RDP, vb.)
-- `docs/eylem-plani.md` — 2026-09-07'den itibaren yapılacak somut adımlar (komut protokolü, boş basımda RX penceresi, STATUS interval komutu, buzzer/LED komutu, tarih aralığı sorgusu, flash yazım sıklığı) ve bağımlılık sırası
+- `docs/urun-yol-haritasi.md` — ürüne dönüşme yol haritası: üretime çıkmadan önce çözülmesi gereken kritik riskler (paylaşılan anahtar, RDP, OTA/provisioning eksikliği, vb.)
+- `docs/eylem-plani.md` — komut protokolü, boş basımda RX penceresi, STATUS interval komutu, buzzer/LED komutu, tarih aralığı sorgusu maddeleri — **tümü uygulandı** (madde 1-5 ✅); her madde için değişen dosyalar ve test önerileri
 - `docs/lorawan-devicetimereq-reference.md` — LoRaWAN DeviceTimeReq referansı
 - `docs/milesight-ug63-lorawan-version-mismatch.md` — Milesight UG63 network server ile gözlemlenen LoRaWAN sürüm uyuşmazlığı (üretici cevabı bekleniyor)
 - `external_libs/persistent_circular_buffer/README_TR.md` — kalıcı buffer'ın kendi detaylı dokümantasyonu
