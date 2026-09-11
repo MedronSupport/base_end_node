@@ -68,49 +68,41 @@ Bu dosya, `docs/urun-yol-haritasi.md`'deki tartışmadan çıkan somut adımlar�
 
 **Uygulanan tasarım:**
 - **Genel komut protokolü de bu maddeyle birlikte, minimal şekilde kuruldu** (madde 1/3/5'in de üzerine oturacağı temel): `LORA_COMMAND_DOWNLINK_TYPE=0x02`, `[0]=0x02, [1]=komut ID, [2:N]=parametreler`. `OnRxData()`'da zaman senkron kontrolü `false` dönerse `LoraCommand_HandleDownlink()`'e düşüyor.
-- Buzzer/LED komutu (`LORA_CMD_ID_BUZZER_LED=0x01`, 6 byte): `[2]=hedef (bit0:buzzer, bit1:led), [3]=pattern (0:sürekli, 1:bip-bip), [4:5]=istenen süre (ms, büyük-endian)`.
-- **MUTLAK sınır garantisi:** `effectiveMs = min(istenen_sure, MAX_BUZZER_LED_DURATION_MS)` — bu hesap HER ZAMAN yapılıyor, istenen değer ne olursa olsun (0xFFFF dahil). Güvenlik timer'ı (`BuzzerLedSafetyTimer`) HER komutta, İSTENEN değil UYGULANAN (sınırlanmış) süreyle kuruluyor — komutun kendi mantığı bypass edilse bile bu son kontrol atlanamaz.
-- `MAX_BUZZER_LED_DURATION_MS = 15000` (15 sn) seçildi — hem watchdog timeout'undan (30 sn) hem kick periyodundan (20 sn) rahat marjlı, hem de **bloklamayan bir tasarımla** birleşince bu marj daha da rahat (aşağıya bkz).
-- **Bloklamayan tasarım (kritik karar):** Mevcut `Buzzer_Alert_Process(ms)` fonksiyonu `HAL_Delay` ile BLOKLUYOR — 15 saniyelik bir komut için bu, sequencer'ı o kadar süre kilitler ve watchdog kick görevinin çalışmasını engelleyip cihazın KENDİ KENDİNİ resetlemesine yol açabilirdi. Bunun yerine buzzer/LED pini `UTIL_TIMER` ile yönetiliyor: sürekli pattern'de pin sabit açık kalıyor (GPIO çıkışı Stop2'de de korunuyor, CPU'nun uyanık kalmasına bile gerek yok), bip-bip pattern'inde 300 ms'lik periyodik bir timer pini değiştiriyor — sequencer hiçbir zaman bloklanmıyor, watchdog'la sıfır etkileşim riski.
+- Buzzer/LED komutu (`LORA_CMD_ID_BUZZER_LED=0x01`, 6 byte): `[2]=hedef (bit0:buzzer, bit1:led), [3]=pattern (0:sürekli, 1:bip-bip), [4:5]=istenen süre (SANİYE, büyük-endian)`.
+- **Süre birimi bilerek SANİYE, ms değil:** İlk tasarımda ms kullanılmıştı ama 2 byte'lık alana ms cinsinden sığan azami değer ~65,5 saniye — "kayıp cihaz bulma" senaryosu (kullanıcı talebiyle 3 dakikaya çıkarıldı) için yetersiz kalıyordu. Saniyeye geçilince aynı 2 byte ile ~18,2 saate kadar yer açıldı.
+- **MUTLAK sınır garantisi:** `effectiveMs = min(istenen_sure_sn × 1000, MAX_BUZZER_LED_DURATION_MS)` — bu hesap HER ZAMAN yapılıyor, istenen değer ne olursa olsun (0xFFFF saniye dahil). Güvenlik timer'ı (`BuzzerLedSafetyTimer`) HER komutta, İSTENEN değil UYGULANAN (sınırlanmış) süreyle kuruluyor — komutun kendi mantığı bypass edilse bile bu son kontrol atlanamaz.
+- `MAX_BUZZER_LED_DURATION_MS = 180000` (**3 dakika**) — kullanıcı talebiyle güncellendi: amaç, kayıp/kaybolmuş bir cihazı sesle bulabilmek. Bu değer **watchdog timeout'uyla (30 sn) SINIRLI DEĞİL** — aşağıdaki bloklamayan tasarım sayesinde süre uzunluğunun watchdog'la hiçbir etkileşimi yok.
+- **Bloklamayan tasarım (kritik karar, 3 dakikayı güvenli kılan asıl sebep):** Mevcut `Buzzer_Alert_Process(ms)` fonksiyonu `HAL_Delay` ile BLOKLUYOR — 3 dakikalık bir komut için bunu kullansaydık sequencer o kadar süre kilitlenir, watchdog kick görevi çalışamaz, cihaz KENDİ KENDİNİ resetlerdi. Bunun yerine buzzer/LED pini `UTIL_TIMER` ile yönetiliyor: sürekli pattern'de pin sabit açık kalıyor (GPIO çıkışı Stop2'de de korunuyor, CPU'nun uyanık kalmasına bile gerek yok), bip-bip pattern'inde 300 ms'lik periyodik bir timer pini değiştiriyor — sequencer hiçbir zaman bloklanmıyor, süre ne kadar uzun olursa olsun watchdog'la sıfır etkileşim riski.
 - RFID okuma/gönderimiyle aynı GPIO'ları (buzzer/awake LED) paylaştığı için, tam olarak aynı anda bir RFID okuması da oluyorsa küçük bir görsel/işitsel çakışma olabilir — kritik değil, bilinçli olarak ele alınmadı (dokümante edildi).
 
-**Değişen dosyalar:** `LoRaWAN/App/lora_app.h` (yeni komut sabitleri), `Core/Inc/utilities_def.h` (2 yeni görev), `LoRaWAN/App/lora_app.c` (2 timer, 2 binding, 4 fonksiyon, `OnRxData()` bağlantısı).
+**Değişen dosyalar:** `LoRaWAN/App/lora_app.h` (yeni komut sabitleri), `Core/Inc/utilities_def.h` (2 yeni görev), `LoRaWAN/App/lora_app.c` (2 timer, 2 binding, 4 fonksiyon, `OnRxData()` bağlantısı), `docs/test_codes/lw_lora_rif_decoder.py` (interaktif `buzzer` komutu, saniye birimine güncellendi).
 
-**Test edilmesi gereken:** Sunucudan `[0x02, 0x01, hedef, pattern, süre_MSB, süre_LSB]` formatında bir downlink gönderip loglarda `"Buzzer/LED komutu alindi"` ve süresi dolunca `"Buzzer/LED komutu suresi doldu"` satırlarını doğrula; özellikle `istenen > 15000` gönderip `uygulanan` alanının hep 15000'de sabit kaldığını teyit et.
+**Test edilmesi gereken:** Sunucudan `[0x02, 0x01, hedef, pattern, süre_sn_MSB, süre_sn_LSB]` formatında bir downlink gönderip loglarda `"Buzzer/LED komutu alindi"` ve süresi dolunca `"Buzzer/LED komutu suresi doldu"` satırlarını doğrula; özellikle `istenen > 180` (saniye) gönderip `uygulanan` alanının hep `180000 ms`'de sabit kaldığını teyit et.
 
 ---
 
-## 5. Buffer'dan tarih aralığı sorgulama komutu
+## 5. Buffer'dan tarih aralığı sorgulama komutu — ✅ UYGULANDI (2026-09-11)
 
 **Amaç:** Sunucudan "şu iki tarih arasındaki kayıtları gönder" komutu.
 
-**Teknik notlar — iyi haber:**
-- `persistent_circular_buffer.h`'de bu sorgu için gereken alt katman **zaten var**: `pcb_get_by_timestamp(handle, start_timestamp, end_timestamp, ...)`. Yani depolama tarafında sıfırdan bir şey yazmaya gerek yok.
-- Eksik olan: (a) bu sorguyu tetikleyecek bir downlink komutu (madde 1'in parçası), (b) eşleşen (potansiyel olarak birden fazla) kaydı sunucuya GERİ göndermek için bir "raporlama" akışı — muhtemelen mevcut `SendBufferedRfidLogHandler`'ın gönderim mantığı (LIFO değil bu sefer tarih sırasıyla) yeniden kullanılabilir.
-- Çok kayıt eşleşirse (örn. geniş bir tarih aralığı), bunları tek seferde değil, mevcut buffer-drain deseniyle (`BufferedDrainDelayTimer`, art arda göndermeyi engelleyen 10 sn bekleme) birer birer göndermek gerekir — pil/duty-cycle açısından bu akışın ne kadar süreceği önceden tahmin edilmeli.
+**Uygulanan tasarım:**
+- **Komut** (`LORA_CMD_ID_QUERY_BY_DATE=0x02`, 10 byte): `[0]=0x02 [1]=0x02 [2:6]=start_timestamp [6:10]=end_timestamp` (ikisi de büyük-endian uint32).
+- **Depolama:** `pcb_get_by_timestamp()` zaten hazırdı — tek çağrıda tüm eşleşen kayıtlar (`QUERY_MAX_RESULTS=30` kapasiteli, RAM'de 480 byte, 96KB'lik bütçede önemsiz) statik bir diziye çekiliyor; `PCB_TRUNCATED` dönerse not ediliyor.
+- **Raporlama — DR'ye duyarlı, çoklu-kayıt/mesaj (batching):** Önceki "1 kayıt = 1 mesaj" fikri yerine, `LmHandlerGetTxDatarate()` ile o anki DR öğrenilip (EU868, `RegionEU868.h`'deki gerçek tablo: DR0-2→51 byte, DR3→115 byte, DR4+→242 byte) her mesaja **sığdığı kadar** kayıt paketleniyor — kötü sinyalde bile birkaç kayıt, iyi sinyalde 15+ kayıt tek mesajda gidebiliyor. Basitlik için batch hesabı hep en kötü durumu (7-byte UID, 12 byte/kayıt) varsayıyor.
+- **Kayıt kodlaması — ayraçsız, kendi kendini sınırlayan (TLV):** `[uuid_uzunluk(1)][uuid(4/7 byte)][timestamp(4 byte BE)]` — uzunluk ön eki sayesinde ayraç byte'ına gerek yok.
+- **Yeni uplink tipi** (`LORA_RFID_MSG_TYPE_QUERY_RESULT=0x46`): mevcut `LIVE_UID` (0x45) tipinden bilerek ayrı — sunucu bunu "yeni bir olay" değil "geçmişten tekrar raporlanan kayıt" olarak ayırt edebilsin diye. Header: `[2]=bu mesajdaki kayıt, [3]=şu ana kadar toplam, [4]=batch index, [5]=kırpıldı mı`.
+- **0 sonuç:** Özel bir dal gerekmedi — paketleme döngüsü doğal olarak 0 kayıt paketler, `[2]=0,[3]=0` içeren tek bir header mesajı gider, sunucu sessizce beklemez.
+- **Eşzamanlılık:** `g_queryInProgress` bayrağı — rapor sürerken yeni bir sorgu komutu reddediliyor; mevcut RFID/status/buffer-drain guard'larına da uyuyor (meşgulse rapor ERTELENİYOR, kaybedilmiyor — STATUS/RFID'nin aksine bu veri kritik kabul edildi).
+- **Zincirleme:** `QueryReportDelayTimer` (10 sn, `BufferedDrainDelayTimer` ile aynı desen) her batch sonrası kendini yeniden başlatıp bir sonraki batch'i tetikliyor, ta ki tüm kayıtlar gidene kadar.
 
-**Yapılacaklar:**
-- [ ] Komut payload formatı: `[tip][komut ID][start_timestamp][end_timestamp]`.
-- [ ] `pcb_get_by_timestamp` sonuçlarını sırayla gönderecek bir "rapor modu" state machine'i tasarla (mevcut buffer-drain akışından türetilebilir).
-- [ ] Çok sonuçlu sorgularda toplam süre/pil maliyetini tahmin et, gerekirse üst sınır koy (örn. "en fazla N kayıt bir seferde raporlanır").
-- [ ] Madde 1 (komut protokolü) tamamlanınca komut ID'si ata.
+**Değişen dosyalar:** `LoRaWAN/App/lora_app.h` (yeni komut/mesaj tipi sabitleri), `Core/Inc/utilities_def.h` (1 yeni görev), `LoRaWAN/App/lora_app.c` (1 timer, 1 binding, durum değişkenleri, 3 fonksiyon: `GetMaxAppPayloadForCurrentDR`, `SendQueryBatchHandler`, komut dispatch dalı), `docs/test_codes/lw_lora_rif_decoder.py` (`query` komutu + 0x46 çözümleme + `_fmt_epoch` ortak yardımcıya çıkarıldı).
 
-**Durum:** Madde 1'i bekliyor; depolama alt yapısı zaten hazır olduğu için görece düşük riskli.
+**Test edilmesi gereken:** `query <start> <end>` ile bir sorgu gönderip loglarda `"Tarih araligi sorgusu alindi"`, ardından `"Sorgu raporu batch #0: N kayit..."` satırlarını doğrula; Python tarafında her batch'in `📦 QUERY_RESULT` olarak doğru ayrıştırıldığını, `total_so_far` değerinin batch'ler arasında doğru arttığını kontrol et. Geniş bir aralık isteyip `PCB_TRUNCATED` durumunu (kırpıldı uyarısı) da bir kez tetiklemek faydalı olur.
 
 ---
 
-## Genel Bağımlılık Sırası
+## Genel Durum
 
-```
-Madde 1 (genel komut protokolü, urun-yol-haritasi.md'den)
-   ├── Madde 3 (status interval komutu)
-   ├── Madde 4 (buzzer/LED komutu)
-   └── Madde 5 (tarih aralığı sorgu komutu)
-
-Madde 2 (boş basımda RX penceresi) — bağımsız, hemen başlanabilir
-Madde 1'deki "STATUS'u parçalama" — bağımsız ama düşük öncelik (madde 2/3 daha etkili)
-```
-
-**Önerilen başlangıç sırası:** Önce **genel komut protokolü** (madde 1'in temeli), çünkü 3/4/5 hepsi buna bağımlı. Paralel olarak **madde 2** (bağımsız, düşük risk) başlanabilir.
+Madde 1, 2, 4, 5 **uygulandı**. Geriye sadece **madde 3** (STATUS mesaj aralığını uzaktan değiştirme) kaldı — genel komut protokolü (`LORA_COMMAND_DOWNLINK_TYPE`, `LoraCommand_HandleDownlink`) madde 4/5 ile birlikte zaten kuruldu, madde 3 bunun üzerine yeni bir komut ID (`LORA_CMD_ID_*`) eklemekten ibaret; `UTIL_TIMER` API'sinin çalışan bir periyodik timer'ın periyodunu değiştirme yolu (`Stop`+`Create`(yeni periyot)+`Start`) `BuzzerLedSafetyTimer`'da zaten doğrulandı, aynı desen `StatusMessageTimeoutTimer` için de kullanılabilir.
 
 > **Not:** Flash yazım sıklığını azaltma (pcb_sync) maddesi bilerek bu plandan çıkarıldı — şimdilik üzerinde değişiklik yapılmayacak.

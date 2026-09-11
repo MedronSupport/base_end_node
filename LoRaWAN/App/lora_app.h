@@ -152,10 +152,44 @@ typedef enum
 #define LORA_COMMAND_DOWNLINK_TYPE		 0x02U
 
 /* Buzzer/LED komutu, 6 byte:
- *   [0]=0x02 [1]=0x01 [2]=hedef(bit0:buzzer,bit1:led) [3]=pattern(0:surekli,1:bip-bip) [4:5]=istenen sure (ms, buyuk-endian)
+ *   [0]=0x02 [1]=0x01 [2]=hedef(bit0:buzzer,bit1:led) [3]=pattern(0:surekli,1:bip-bip) [4:5]=istenen sure (SANIYE, buyuk-endian)
  * NOT: cihaz istenen sureyi HER ZAMAN MAX_BUZZER_LED_DURATION_MS ile sinirlar -
- * sunucu/yazilim hatasi sonsuz bir bip-bipe yol acamaz. */
+ * sunucu/yazilim hatasi sonsuz bir bip-bipe yol acamaz. Sure birimi bilerek
+ * MS DEGIL SANIYE - "kayip cihaz bulma" gibi dakikalar surebilecek kullanim
+ * senaryolari icin 2 byte'lik alanla (ms olsaydi max ~65,5 sn olurdu, saniye
+ * olunca max ~18,2 saat) yeterli araligi sagliyor. */
 #define LORA_CMD_ID_BUZZER_LED			 0x01U
+
+/* Tarih araligi sorgu komutu, 10 byte:
+ *   [0]=0x02 [1]=0x02 [2:5]=start_timestamp (buyuk-endian) [6:9]=end_timestamp (buyuk-endian)
+ * Cihaz bu araliga giren TUM kayitlari (SENT/FAILED farketmeksizin -
+ * pcb_get_by_timestamp status'a gore filtrelemiyor) DR'ye duyarli, coklu
+ * kayit iceren batch'ler halinde LORA_RFID_MSG_TYPE_QUERY_RESULT ile geri
+ * raporlar - bkz docs/eylem-plani.md madde 5. */
+#define LORA_CMD_ID_QUERY_BY_DATE		 0x02U
+
+/* Tarih araligi sorgusunun sonuc raporu (uplink). Mevcut LIVE_UID
+ * (0x45) tipinden BILEREK ayri - bu "yeni bir olay" degil, gecmisten
+ * tekrar raporlanan bir kayit; sunucu ikisini farkli yorumlayabilsin.
+ *
+ * Header (6 byte) + art arda kayit bloklari:
+ *   [0]=uplink counter
+ *   [1]=0x46
+ *   [2]=bu mesajdaki kayit sayisi
+ *   [3]=bu ana kadar rapor edilen TOPLAM kayit sayisi (bu sorgu icin)
+ *   [4]=bu mesajin batch index'i (0'dan baslar)
+ *   [5]=kirpildi mi (0/1) - PCB_TRUNCATED, daha fazla eslesme olabilir
+ *
+ * Her kayit, kendi kendini sinirlayan (TLV) degisken uzunlukta:
+ *   [0]=uuid_uzunluk (4 ya da 7)
+ *   [1:N]=uuid (uuid_uzunluk kadar byte)
+ *   [N:N+4]=timestamp (buyuk-endian)
+ *
+ * DR'ye gore batch basina kac kayit sigacagi calisma zamaninda hesaplanir
+ * (bkz GetMaxAppPayloadForCurrentDR, lora_app.c) - ADR aktif oldugu icin
+ * sabit degildir. 0 eslesme durumunda tek, kayitsiz bir header mesaji
+ * ([2]=0,[3]=0) gonderilir - sunucu sessizce beklemesin diye. */
+#define LORA_RFID_MSG_TYPE_QUERY_RESULT	 0x46
 /* USER CODE END EM */
 
 /* Exported functions prototypes ---------------------------------------------*/

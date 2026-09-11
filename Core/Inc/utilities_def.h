@@ -93,6 +93,7 @@ typedef enum
   CFG_SEQ_Task_IndPingEvent,
   CFG_SEQ_Task_BuzzerLedSafetyEvent,
   CFG_SEQ_Task_BuzzerLedToggleEvent,
+  CFG_SEQ_Task_QueryReportEvent,
   /* USER CODE END CFG_SEQ_Task_Id_t */
   CFG_SEQ_Task_NBR
 } CFG_SEQ_Task_Id_t;

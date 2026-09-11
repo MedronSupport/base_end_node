@@ -252,6 +252,8 @@ static void BuzzerLedAllOff(void);
 static void BuzzerLedSafetyStopHandler(void);
 static void BuzzerLedToggleHandler(void);
 static bool LoraCommand_HandleDownlink(const uint8_t *buffer, uint8_t size);
+static uint16_t GetMaxAppPayloadForCurrentDR(void);
+static void SendQueryBatchHandler(void);
 static void SendBufferedRfidLogHandler(void);
 static void BufferAckTimeoutHandler(void);
 /* Yedi ayri "timer ates alinca sadece bir sequencer task'i tetikle"
@@ -391,13 +393,37 @@ static UTIL_TIMER_Object_t JoinTimeoutTimer;
 /* Uzaktan buzzer/LED komutu - bkz docs/eylem-plani.md madde 4. MUTLAK KURAL:
  * sunucu/yazilim hatasi ne isterse istesin, cihaz bu sureyi ASLA asmaz -
  * BuzzerLedSafetyTimer, komutun kendi istedigi sureden BAGIMSIZ olarak her
- * zaman kurulur ve suresi dolunca koşulsuz olarak buzzer/LED'i kapatir. */
-#define MAX_BUZZER_LED_DURATION_MS      15000U
+ * zaman kurulur ve suresi dolunca koşulsuz olarak buzzer/LED'i kapatir.
+ * 3 dakika (180 sn) - "kart/cihaz kaybolursa sesle bulma" senaryosu icin.
+ * NOT: bu deger IWDG/watchdog ile SINIRLI DEGIL - buzzer/LED tamamen
+ * UTIL_TIMER tabanli, bloklamayan (HAL_Delay YOK) bir tasarimla yonetiliyor,
+ * yani sequencer hicbir zaman durmuyor, watchdog kick gorevi normal
+ * calismaya devam ediyor - bkz BuzzerLedToggleHandler/BuzzerLedSafetyStopHandler. */
+#define MAX_BUZZER_LED_DURATION_MS      180000U
 #define BUZZER_LED_TOGGLE_HALF_PERIOD_MS 300U
 static UTIL_TIMER_Object_t BuzzerLedSafetyTimer;
 static UTIL_TIMER_Object_t BuzzerLedToggleTimer;
 static bool g_buzzerLedTargetBuzzer = false;
 static bool g_buzzerLedTargetLed = false;
+
+/* Tarih araligi sorgu komutu - bkz docs/eylem-plani.md madde 5.
+ * QUERY_MAX_RESULTS: RAM 30*16=480 byte, cihazda 96KB RAM var, onemsiz.
+ * QUERY_RECORD_MAX_WIRE_SIZE: batch basina kac kayit sigacagini hesaplarken
+ * BASITLIK icin HER ZAMAN en kotu durum (7-byte UID -> 1+7+4=12 byte)
+ * varsayilir - 4-byte UID'lerde bir miktar yer israf edilir ama kod
+ * (degisken boyutlu paketleme yerine) çok daha basit kalir. */
+#define QUERY_MAX_RESULTS          30U
+#define QUERY_REPORT_DELAY_MS      10000U
+#define QUERY_RECORD_MAX_WIRE_SIZE 12U
+#define QUERY_RESULT_HEADER_SIZE   6U
+
+static pcb_record_t g_queryMatches[QUERY_MAX_RESULTS];
+static size_t g_queryMatchCount = 0;
+static size_t g_queryNextIndex = 0;
+static uint8_t g_queryBatchIndex = 0;
+static bool g_queryTruncated = false;
+static bool g_queryInProgress = false;
+static UTIL_TIMER_Object_t QueryReportDelayTimer;
 
 volatile bool stop_read_rfid=false;
 static bool RfidStopLockActive = false;
@@ -503,6 +529,7 @@ static const LoraTimerTaskBinding_t kJoinTimeoutBinding      = { CFG_SEQ_Task_Jo
 static const LoraTimerTaskBinding_t kIndPingBinding      = { CFG_SEQ_Task_IndPingEvent,       CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kBuzzerLedSafetyBinding = { CFG_SEQ_Task_BuzzerLedSafetyEvent, CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kBuzzerLedToggleBinding = { CFG_SEQ_Task_BuzzerLedToggleEvent, CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kQueryReportBinding = { CFG_SEQ_Task_QueryReportEvent, CFG_SEQ_Prio_0 };
 
 /**
   * @brief  Yukaridaki kStatusMsgBinding/kRfidAckTimeoutBinding/... sabitlerinden
@@ -577,6 +604,10 @@ void LoRaWAN_Init(void)
   UTIL_TIMER_Create(&BuzzerLedSafetyTimer, MAX_BUZZER_LED_DURATION_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kBuzzerLedSafetyBinding);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_BuzzerLedToggleEvent), UTIL_SEQ_RFU, BuzzerLedToggleHandler);
   UTIL_TIMER_Create(&BuzzerLedToggleTimer, BUZZER_LED_TOGGLE_HALF_PERIOD_MS, UTIL_TIMER_PERIODIC, OnTimerFiresSetTask, (void *)&kBuzzerLedToggleBinding);
+
+  //tarih araligi sorgu komutu - bkz docs/eylem-plani.md madde 5
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_QueryReportEvent), UTIL_SEQ_RFU, SendQueryBatchHandler);
+  UTIL_TIMER_Create(&QueryReportDelayTimer, QUERY_REPORT_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kQueryReportBinding);
   /* USER CODE END LoRaWAN_Init_1 */
 
   UTIL_TIMER_Create(&JoinRetryTimer, JOIN_RETRY_DELAY, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinRetryBinding);
@@ -873,14 +904,18 @@ static bool LoraCommand_HandleDownlink(const uint8_t *buffer, uint8_t size)
 
 		uint8_t hedef = buffer[2];
 		uint8_t pattern = buffer[3];
-		uint32_t requestedMs = ((uint32_t)buffer[4] << 8) | (uint32_t)buffer[5];
+		/* Alan SANIYE cinsinden (bkz lora_app.h) - 2 byte'a ms sigmayacagi
+		 * icin (max ~65,5 sn olurdu, "kayip cihaz bulma" gibi dakikalar
+		 * surebilecek senaryolar icin yetersiz). */
+		uint32_t requestedSeconds = ((uint32_t)buffer[4] << 8) | (uint32_t)buffer[5];
+		uint32_t requestedMs = requestedSeconds * 1000UL;
 		/* MUTLAK KURAL: istenen sure ne olursa olsun (sunucu/yazilim hatasi
-		 * dahil, orn. 0xFFFF), cihaz kendi azami sinirinin USTUNE CIKMAZ. */
+		 * dahil, orn. 0xFFFF saniye), cihaz kendi azami sinirinin USTUNE CIKMAZ. */
 		uint32_t effectiveMs = (requestedMs > MAX_BUZZER_LED_DURATION_MS) ? MAX_BUZZER_LED_DURATION_MS : requestedMs;
 
 		APP_LOG(TS_OFF, VLEVEL_M,
-				"###### Buzzer/LED komutu alindi: hedef=0x%02X, pattern=%u, istenen=%u ms, uygulanan=%u ms\r\n",
-				hedef, pattern, (unsigned int)requestedMs, (unsigned int)effectiveMs);
+				"###### Buzzer/LED komutu alindi: hedef=0x%02X, pattern=%u, istenen=%u sn, uygulanan=%u ms\r\n",
+				hedef, pattern, (unsigned int)requestedSeconds, (unsigned int)effectiveMs);
 
 		/* Onceki bir komut hala aktifse once temizle - yeni komut oncelikli. */
 		UTIL_TIMER_Stop(&BuzzerLedSafetyTimer);
@@ -921,8 +956,176 @@ static bool LoraCommand_HandleDownlink(const uint8_t *buffer, uint8_t size)
 		return true;
 	}
 
+	if (cmdId == LORA_CMD_ID_QUERY_BY_DATE)
+	{
+		if (size != 10U)
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu komutu gecersiz boyut (%d)\r\n", size);
+			return true;
+		}
+		if (g_queryInProgress)
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu komutu reddedildi - zaten bir sorgu raporu suruyor\r\n");
+			return true;
+		}
+
+		uint32_t startTs = ((uint32_t)buffer[2] << 24) | ((uint32_t)buffer[3] << 16)
+				| ((uint32_t)buffer[4] << 8) | (uint32_t)buffer[5];
+		uint32_t endTs = ((uint32_t)buffer[6] << 24) | ((uint32_t)buffer[7] << 16)
+				| ((uint32_t)buffer[8] << 8) | (uint32_t)buffer[9];
+
+		if (startTs > endTs)
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu komutu gecersiz: start(%u) > end(%u)\r\n",
+					(unsigned int)startTs, (unsigned int)endTs);
+			return true;
+		}
+
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Tarih araligi sorgusu alindi: [%u, %u]\r\n",
+				(unsigned int)startTs, (unsigned int)endTs);
+
+		pcb_result_t queryResult = pcb_get_by_timestamp(&eventBuffer, startTs, endTs,
+				g_queryMatches, QUERY_MAX_RESULTS, &g_queryMatchCount);
+
+		g_queryTruncated = (queryResult == PCB_TRUNCATED);
+		g_queryNextIndex = 0;
+		g_queryBatchIndex = 0;
+
+		if ((queryResult != PCB_OK) && (queryResult != PCB_TRUNCATED))
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu basarisiz (pcb_result=%d)\r\n", (int)queryResult);
+			g_queryMatchCount = 0;
+		}
+
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu sonucu: %u kayit bulundu%s\r\n",
+				(unsigned int)g_queryMatchCount,
+				g_queryTruncated ? " (KIRPILDI - daha fazlasi olabilir, araligi daraltin)" : "");
+
+		/* 0 eslesme dahil - SendQueryBatchHandler bos bir header mesaji
+		 * gonderip hemen "tamamlandi" durumuna gececek, sunucu sessizce
+		 * beklemeyecek. */
+		g_queryInProgress = true;
+		UTIL_TIMER_Start(&QueryReportDelayTimer);
+
+		return true;
+	}
+
 	APP_LOG(TS_OFF, VLEVEL_M, "###### Bilinmeyen komut ID: 0x%02X\r\n", cmdId);
 	return true;
+}
+
+/**
+  * @brief  O anki Data Rate'e gore izin verilen azami uygulama payload'ini
+  *         (byte) dondurur - EU868, repeater DESTEKLENMEDEN (bkz
+  *         Middlewares/.../RegionEU868.h MaxPayloadOfDatarateEU868).
+  *         ADR aktif oldugu icin DR degisebilir - HER batch'te yeniden
+  *         sorgulanmali, sabit bir deger varsayilmamali.
+  */
+static uint16_t GetMaxAppPayloadForCurrentDR(void)
+{
+	static const uint16_t maxPayloadByDr[8] = { 51U, 51U, 51U, 115U, 242U, 242U, 242U, 242U };
+	int8_t dr = 0;
+
+	if (LmHandlerGetTxDatarate(&dr) != LORAMAC_HANDLER_SUCCESS)
+	{
+		return 51U; /* bilinmiyorsa en kotu durumu (DR0) varsay */
+	}
+	if ((dr < 0) || (dr > 7))
+	{
+		return 51U;
+	}
+	return maxPayloadByDr[dr];
+}
+
+/**
+  * @brief  g_queryMatches[] icindeki kalan kayitlardan, o anki DR'ye gore
+  *         hesaplanan bir batch'i AppData'ya paketleyip gonderir. Daha
+  *         kayit varsa QueryReportDelayTimer'i yeniden baslatip kendini
+  *         zincirler (BufferedDrainDelayTimer/SendBufferedRfidLogHandler
+  *         ile ayni desen). 0 eslesmeli bir sorguda tek, kayitsiz bir
+  *         header mesaji gonderip hemen tamamlanir.
+  */
+static void SendQueryBatchHandler(void)
+{
+	if (rfid_data_pending_on_lora || buffered_rfid_data_wait_for_ack || status_data_pending_on_lora)
+	{
+		/* AppData paylasimli - baska bir gonderim bitene kadar ertele,
+		 * sorgu raporunu KAYBETME (STATUS/RFID'nin aksine bu veri onemli). */
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu raporu ertelendi - baska bir gonderim devam ediyor\r\n");
+		UTIL_TIMER_Start(&QueryReportDelayTimer);
+		return;
+	}
+	if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET)
+	{
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu raporu iptal edildi - join yok\r\n");
+		g_queryInProgress = false;
+		return;
+	}
+
+	uint16_t maxPayload = GetMaxAppPayloadForCurrentDR();
+	uint16_t budget = (maxPayload > QUERY_RESULT_HEADER_SIZE) ? (maxPayload - QUERY_RESULT_HEADER_SIZE) : 0U;
+	uint16_t maxRecordsThisBatch = budget / QUERY_RECORD_MAX_WIRE_SIZE;
+	if (maxRecordsThisBatch == 0U)
+	{
+		maxRecordsThisBatch = 1U; /* en kotu DR'de bile en az 1 kayit gitsin */
+	}
+
+	uint16_t offset = QUERY_RESULT_HEADER_SIZE;
+	uint8_t packedCount = 0U;
+
+	while ((g_queryNextIndex < g_queryMatchCount) && (packedCount < maxRecordsThisBatch))
+	{
+		const pcb_record_t *rec = &g_queryMatches[g_queryNextIndex];
+		uint8_t uidLen = rec->uuid_length;
+
+		if ((uidLen != 4U) && (uidLen != 7U))
+		{
+			/* Beklenmeyen/bozuk uzunluk - bu kaydi atla, ilerlemeye devam et. */
+			g_queryNextIndex++;
+			continue;
+		}
+		if ((offset + 1U + uidLen + 4U) > LORAWAN_APP_DATA_BUFFER_MAX_SIZE)
+		{
+			break; /* buffer tasmasin - kalanlar bir sonraki batch'e */
+		}
+
+		AppData.Buffer[offset] = uidLen;
+		memcpy(&AppData.Buffer[offset + 1U], rec->uuid, uidLen);
+		WriteU32BE(&AppData.Buffer[offset + 1U + uidLen], rec->timestamp);
+
+		offset = (uint16_t)(offset + 1U + uidLen + 4U);
+		packedCount++;
+		g_queryNextIndex++;
+	}
+
+	AppData.Port = LORAWAN_USER_APP_PORT;
+	AppData.Buffer[0] = UplinkCounter++;
+	AppData.Buffer[1] = LORA_RFID_MSG_TYPE_QUERY_RESULT;
+	AppData.Buffer[2] = packedCount;
+	AppData.Buffer[3] = (uint8_t)g_queryNextIndex;
+	AppData.Buffer[4] = g_queryBatchIndex;
+	AppData.Buffer[5] = g_queryTruncated ? 1U : 0U;
+	AppData.BufferSize = offset;
+
+	LmHandlerErrorStatus_t sendStatus = LmHandlerSend(&AppData, LORAMAC_HANDLER_UNCONFIRMED_MSG, false);
+
+	APP_LOG(TS_OFF, VLEVEL_M,
+			"###### Sorgu raporu batch #%u: %u kayit (toplam %u/%u gonderildi), sonuc=%d\r\n",
+			g_queryBatchIndex, packedCount, (unsigned int)g_queryNextIndex,
+			(unsigned int)g_queryMatchCount, (int)sendStatus);
+
+	g_queryBatchIndex++;
+
+	if (g_queryNextIndex < g_queryMatchCount)
+	{
+		UTIL_TIMER_Start(&QueryReportDelayTimer);
+	}
+	else
+	{
+		g_queryInProgress = false;
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Sorgu raporu tamamlandi (%u kayit, %u batch)\r\n",
+				(unsigned int)g_queryMatchCount, g_queryBatchIndex);
+	}
 }
 
 static void RfidPreventStopMode(void)
