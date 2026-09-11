@@ -104,17 +104,35 @@ STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her m
 
 ## Dokümanlar
 
+`docs/` klasörü konuya göre alt klasörlere ayrılmıştır:
+
+**Protokol ve süreç (`docs/` kökü):**
 - `docs/server-gelistirici-rehberi.md` — **sunucu geliştirici rehberi:** MQTT topic'leri, tüm uplink/downlink mesajlarının byte-seviyesi payload tabloları ve örnekleri, zaman senkron mekanizması, hata/red davranışları, buffer semantiği — kod referansı olmadan, saf protokol dokümantasyonu
 - `docs/test-plan-lora_app.md` — senaryo bazlı test planı (buffer, RFID/status ACK zincirleri, rejoin, LPM, zaman senkronu, refactor regresyonu)
-- `docs/urun-yol-haritasi.md` — ürüne dönüşme yol haritası: üretime çıkmadan önce çözülmesi gereken kritik riskler (paylaşılan anahtar, RDP, OTA/provisioning eksikliği, vb.)
-- `docs/eylem-plani.md` — komut protokolü, boş basımda RX penceresi, STATUS interval komutu, buzzer/LED komutu, tarih aralığı sorgusu maddeleri — **tümü uygulandı** (madde 1-5 ✅); her madde için değişen dosyalar ve test önerileri
-- `docs/lorawan-devicetimereq-reference.md` — LoRaWAN DeviceTimeReq referansı
-- `docs/milesight-ug63-lorawan-version-mismatch.md` — Milesight UG63 network server ile gözlemlenen LoRaWAN sürüm uyuşmazlığı (üretici cevabı bekleniyor)
+- `docs/Ürünleştirmeye Yönelik Eylem-Plani_UYGULANDI.md` — ürüne dönüşme yol haritası ve buradan çıkan somut eylem maddeleri (komut protokolü, boş basımda RX penceresi, STATUS interval komutu, buzzer/LED komutu, tarih aralığı sorgusu) — **tümü uygulandı** (madde 1-5 ✅); her madde için değişen dosyalar ve test önerileri; ayrıca üretime çıkmadan önce çözülmesi gereken kritik riskler (paylaşılan anahtar, RDP, OTA/provisioning eksikliği, vb.)
+- `docs/LW_RFID_infografik.html` — ürünün çalışma prensibini özetleyen HTML infografik
+
+**`docs/Hardware/`** — donanım referansları: BOM (`LOW_POWER_RFID_BOM.xlsx`), MFRC522/BC337/BS250P/NDS7002A-D datasheet'leri, güç tüketim ölçüm fotoğrafı (`power_test_lwrfid.png` — bkz. Güç Tüketim Testi bölümü)
+
+**`docs/E5 Mini Module/`** — LoRa-E5 mini modülünün şematiği, özellik dokümanı ve pinout görseli
+
+**`docs/stm32wle5/`** — STM32WLE5 MCU datasheet'i ve RM0461 referans kılavuzu
+
+**`docs/Sorunlar/`** — sahada/geliştirmede karşılaşılan sorunların analiz kayıtları:
+- `lorawan-devicetimereq-reference.md` — LoRaWAN DeviceTimeReq referansı
+- `milesight-ug63-lorawan-version-mismatch.md` — Milesight UG63 network server ile gözlemlenen LoRaWAN sürüm uyuşmazlığı (üretici cevabı bekleniyor)
+- `LoRaWAN RX Penceresi Sorunu.pdf`, `ack_alinamama_sorunu_ozet.txt` — RX penceresi/ACK alınamama sorunlarının log bazlı kök neden analizleri
+
+**Diğer:**
 - `external_libs/persistent_circular_buffer/README_TR.md` — kalıcı buffer'ın kendi detaylı dokümantasyonu
+
+## Güç Tüketim Testi
+
+Cihazın Stop2 modu ve periyodik uyanma döngüsüne dayalı güç tüketimi, `docs/LOW POWER LORAWAN RFID READER GÜÇ TESTİ v2.docx` içinde ölçüm sonuçlarıyla birlikte raporlanmıştır. Ölçüm düzeneğinin fotoğrafı `docs/Hardware/power_test_lwrfid.png` dosyasındadır.
 
 ## Bilinen Açık Konular
 
 - **Flash senkron sırasında RX penceresi stall riski** — STM32WLE5 tek banklı flash (`stm32wlxx_hal_flash.h`: `FLASH_EraseInitTypeDef`'te bank alanı yok, 128×2KB düz sayfa uzayı, `FLASH_TIMEOUT_VALUE=1000` ms), yani bir sayfa erase/program sırasında CPU — interrupt dahil — tamamen duruyor. Mimari risk gerçek ve kalıcı, ama güncel koddaki karşılıklı dışlama bayrakları (`rfid_data_pending_on_lora`, `buffered_rfid_data_wait_for_ack`, `status_data_pending_on_lora`) aynı anda yalnızca tek bir confirmed uplink'e izin verdiği için, gözlemlenebilir bir tetikleyici yolu şu an kapalı görünüyor. Yoğun trafik altında istatistiksel doğrulama (ACK başarı oranı) yine de faydalı olur, ama düşük olasılıklı bir risk olarak değerlendirilmeli — bkz. `docs/test-plan-lora_app.md` bölüm I.
-- LoRaWAN sürüm uyuşmazlığı (Milesight UG63) — üretici cevabı bekleniyor, bkz. `docs/milesight-ug63-lorawan-version-mismatch.md`.
+- LoRaWAN sürüm uyuşmazlığı (Milesight UG63) — üretici cevabı bekleniyor, bkz. `docs/Sorunlar/milesight-ug63-lorawan-version-mismatch.md`.
 
 
