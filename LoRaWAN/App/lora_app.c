@@ -349,7 +349,7 @@ static UTIL_TIMER_Object_t RfidReadTimeoutTimer;
 static UTIL_TIMER_Object_t StatusMessageTimeoutTimer;
 static UTIL_TIMER_Object_t RetryStatusTimer;
 static UTIL_TIMER_Time_t RFID_TIMEOUT = MFRC_RFID_READ_TIMEOUT;
-static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 3600000;
+static UTIL_TIMER_Time_t STATUS_MSG_TIMEOUT = 60000;
 static UTIL_TIMER_Time_t RETRY_STATUS_TIMEOUT= 15000;
 
 /* STATUS mesaj araligini uzaktan degistirme komutu - bkz docs/eylem-plani.md
@@ -1530,10 +1530,35 @@ static void ResendRfidData(void)
 	}
 }
 
+/* RFID okuyucunun guc acilisi (MFRC522_Power_On_By_GPIO) kisa sureli ama
+ * belirgin bir akim cekisi yaratiyor. Batarya zaten dusukken bu cekis VDD'yi
+ * brown-out esiginin altina itip cihazi resetleyebilir - sahada gozlemlendi:
+ * STATUS 2700 mV rapor ettikten ~40 dk sonra, buton basimiyla baslayan bir
+ * RFID okuma denemesi TAM ORTASINDA (aktif "loop" dongusu icinde) cihaz hic
+ * kapanis/hata logu basmadan sessizce resetlendi (brown-out imzasi). Reset'in
+ * kendisi kadar, reset SONRASI ~10-15 sn'lik "henuz resync olmamis"
+ * penceresinde kaydedilecek bir RFID okumasinin YANLIS zaman damgasiyla
+ * kalici buffer'a yazilmasi da ayri bir risk. Bu yuzden okuma denemesini
+ * (ve MFRC522'nin guc acilisini) baslatmadan ONCE bataryayi olcup esigin
+ * altindaysa okuyucuyu hic guclendirmeden vazgeciyoruz - STATUS zaten
+ * dusuk bataryayi periyodik olarak sunucuya bildiriyor. */
+#define RFID_READ_MIN_BATTERY_MV   2800U
+
 static void ReadRFIDCard(void) {
 	if (rfid_data_pending_on_lora) {
 		APP_LOG(TS_OFF, VLEVEL_M, "###### Onceki RFID gonderimi hala ACK bekliyor, yeni okuma reddedildi\r\n");
 		return;
+	}
+	{
+		int16_t lowBatTempQ8_8 = 0;
+		uint16_t lowBatMv = adc_conv_get_battery_volatge(&lowBatTempQ8_8);
+		if (lowBatMv < RFID_READ_MIN_BATTERY_MV)
+		{
+			APP_LOG(TS_OFF, VLEVEL_M,
+					"###### Batarya dusuk (%u mV < %u mV), RFID okuma denemesi brown-out riskiyle baslatilmiyor\r\n",
+					(unsigned int)lowBatMv, (unsigned int)RFID_READ_MIN_BATTERY_MV);
+			return;
+		}
 	}
 	if (join_in_progress) {
 		/* Aktif bir join surerken RFID okumasi baslatmiyoruz - okuma ~5-6 sn

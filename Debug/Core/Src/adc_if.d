@@ -49,7 +49,8 @@ Core/Src/adc_if.o: ../Core/Src/adc_if.c ../Core/Inc/adc_if.h \
  ../Utilities/trace/adv_trace/stm32_adv_trace.h \
  ../Core/Inc/utilities_conf.h ../Drivers/CMSIS/Include/cmsis_compiler.h \
  ../Utilities/misc/stm32_mem.h ../Utilities/misc/stm32_tiny_vsnprintf.h \
- ../Core/Inc/utilities_def.h
+ ../Core/Inc/utilities_def.h \
+ C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/adc_bat_meas/Inc/adc_bat_meas.h
 ../Core/Inc/adc_if.h:
 ../Core/Inc/adc.h:
 ../Core/Inc/main.h:
@@ -106,3 +107,4 @@ Core/Src/adc_if.o: ../Core/Src/adc_if.c ../Core/Inc/adc_if.h \
 ../Utilities/misc/stm32_mem.h:
 ../Utilities/misc/stm32_tiny_vsnprintf.h:
 ../Core/Inc/utilities_def.h:
+C:/Users/devic/Desktop/LW_RFID/base_end_node/external_libs/adc_bat_meas/Inc/adc_bat_meas.h:

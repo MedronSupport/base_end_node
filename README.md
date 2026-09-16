@@ -112,7 +112,7 @@ STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her m
 - `docs/Ürünleştirmeye Yönelik Eylem-Plani_UYGULANDI.md` — ürüne dönüşme yol haritası ve buradan çıkan somut eylem maddeleri (komut protokolü, boş basımda RX penceresi, STATUS interval komutu, buzzer/LED komutu, tarih aralığı sorgusu) — **tümü uygulandı** (madde 1-5 ✅); her madde için değişen dosyalar ve test önerileri; ayrıca üretime çıkmadan önce çözülmesi gereken kritik riskler (paylaşılan anahtar, RDP, OTA/provisioning eksikliği, vb.)
 - `docs/temiz_nokta_infografik.html` — ürünün çalışma prensibini özetleyen, canlı SVG benzetimli HTML infografik (tarayıcıda açılarak görüntülenir — bkz. aşağıdaki not)
 
-**`docs/Hardware/`** — donanım referansları: BOM (`LOW_POWER_RFID_BOM.xlsx`), MFRC522/BC337/BS250P/NDS7002A-D datasheet'leri, güç tüketim ölçüm fotoğrafı (`power_test_lwrfid.png` — bkz. Güç Tüketim Testi bölümü)
+**`docs/Hardware/`** — donanım referansları: BOM (`LOW_POWER_RFID_BOM.xlsx` — **not: batarya bölücü direnç değerleri BOM'da hâlâ eski 110k/220k olarak görünüyor olabilir, güncel devre 11k/22k kullanıyor, bkz. aşağı**), MFRC522/BC337/BS250P/NDS7002A-D datasheet'leri, devre şeması (`power_test_lwrfidV2.jpg` — güncel; `power_test_lwrfid.png` eski/artık geçerli olmayan sürüm, sadece referans için tutuluyor — bkz. Güç Tüketim Testi bölümü)
 
 **`docs/E5 Mini Module/`** — LoRa-E5 mini modülünün şematiği, özellik dokümanı ve pinout görseli
 
@@ -122,17 +122,17 @@ STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her m
 - `lorawan-devicetimereq-reference.md` — LoRaWAN DeviceTimeReq referansı
 - `milesight-ug63-lorawan-version-mismatch.md` — Milesight UG63 network server ile gözlemlenen LoRaWAN sürüm uyuşmazlığı (üretici cevabı bekleniyor)
 - `LoRaWAN RX Penceresi Sorunu.pdf`, `ack_alinamama_sorunu_ozet.txt` — RX penceresi/ACK alınamama sorunlarının log bazlı kök neden analizleri
+- `STM32WLE5_Batarya_ADC_Sorun_Teshisi_ve_Cozum_Raporu.txt` — batarya geriliminin ADC'de düşük/kararsız okunması sorununun tam teşhis ve çözüm raporu (kök neden: `ADC_ChannelConfTypeDef.SamplingTime` alanına yanlış tür sabit verilmesi + VREFINT'in tek örnekle ölçülmesi — **çözüldü**, bkz. `external_libs/adc_bat_meas/`)
 
 **Diğer:**
 - `external_libs/persistent_circular_buffer/README_TR.md` — kalıcı buffer'ın kendi detaylı dokümantasyonu
 
 ## Güç Tüketim Testi
 
-Cihazın Stop2 modu ve periyodik uyanma döngüsüne dayalı güç tüketimi, `docs/LOW POWER LORAWAN RFID READER GÜÇ TESTİ v2.docx` içinde ölçüm sonuçlarıyla birlikte raporlanmıştır. Ölçüm düzeneğinin fotoğrafı `docs/Hardware/power_test_lwrfid.png` dosyasındadır.
+Cihazın Stop2 modu ve periyodik uyanma döngüsüne dayalı güç tüketimi, `docs/LOW POWER LORAWAN RFID READER GÜÇ TESTİ v2.docx` içinde ölçüm sonuçlarıyla birlikte raporlanmıştır. Test düzeneğinin tam devre şeması `docs/Hardware/power_test_lwrfidV2.jpg` dosyasındadır (LoRa-E5-HF, RFID-RC522, buzzer/LED/buton devreleri ve batarya voltaj bölücüsü dahil).
+
 
 ## Bilinen Açık Konular
-
-- **Flash senkron sırasında RX penceresi stall riski** — STM32WLE5 tek banklı flash (`stm32wlxx_hal_flash.h`: `FLASH_EraseInitTypeDef`'te bank alanı yok, 128×2KB düz sayfa uzayı, `FLASH_TIMEOUT_VALUE=1000` ms), yani bir sayfa erase/program sırasında CPU — interrupt dahil — tamamen duruyor. Mimari risk gerçek ve kalıcı, ama güncel koddaki karşılıklı dışlama bayrakları (`rfid_data_pending_on_lora`, `buffered_rfid_data_wait_for_ack`, `status_data_pending_on_lora`) aynı anda yalnızca tek bir confirmed uplink'e izin verdiği için, gözlemlenebilir bir tetikleyici yolu şu an kapalı görünüyor. Yoğun trafik altında istatistiksel doğrulama (ACK başarı oranı) yine de faydalı olur, ama düşük olasılıklı bir risk olarak değerlendirilmeli — bkz. `docs/test-plan-lora_app.md` bölüm I.
 - LoRaWAN sürüm uyuşmazlığı (Milesight UG63) — üretici cevabı bekleniyor, bkz. `docs/Sorunlar/milesight-ug63-lorawan-version-mismatch.md`.
 
 

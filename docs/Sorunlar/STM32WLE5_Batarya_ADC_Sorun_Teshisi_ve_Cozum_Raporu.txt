@@ -1,0 +1,460 @@
+STM32WLE5 BATARYA ADC ÖLÇÜM SAPMASI
+MÜHENDİSLİK SORUN TEŞHİSİ VE ÇÖZÜM RAPORU
+
+Tarih: 15.09.2026
+Platform: STM32WLE5 / Wio-E5 Mini
+Konu: Batarya geriliminin ADC üzerinden hatalı ve kararsız ölçülmesi
+
+======================================================================
+1. RAPORUN AMACI
+======================================================================
+
+Bu rapor, STM32WLE5 tabanlı cihazda batarya geriliminin ADC ile ölçülmesi
+sırasında gözlenen düşük ve kararsız sonuçların mühendislik açısından
+teşhis edilmesini, yapılan yazılım/ADC konfigürasyon değişikliklerini ve
+son doğrulama sonuçlarını kayıt altına almak amacıyla hazırlanmıştır.
+
+Rapor yalnızca batarya ADC ölçüm problemi ile ilgilidir. LoRaWAN, RFID,
+RTC/time-sync ve breadboard kaynaklı fiziksel bağlantı kesintileri bu
+raporun kapsamı dışındadır.
+
+
+======================================================================
+2. SİSTEM VE ADC ÖLÇÜM YAPISI
+======================================================================
+
+Mikrodenetleyici:
+- STM32WLE5
+- 12-bit ADC çözünürlüğü
+- ADC sayısal aralığı: 0...4095
+- ADC clock: ADC_CLOCK_SYNC_PCLK_DIV4
+- Tek dönüşüm modu (single conversion)
+- Yazılım tetiklemeli dönüşüm
+- DMA kullanılmıyor
+- Oversampling kullanılmıyor
+
+Batarya ölçüm kanalı:
+- GPIO: PB4
+- ADC kanalı: ADC_IN3 / ADC_CHANNEL_3
+- GPIO modu: Analog, no-pull
+
+Batarya bölücü kontrolü:
+- GPIO: PA0
+- Open-drain çıkış
+- Batarya bölücü yalnız ölçüm sırasında aktif ediliyor
+- Ölçüm öncesinde bölücünün oturması için 100 ms bekleniyor
+
+Gerilim bölücü katsayısı:
+- Üst eşdeğer değer: 11.50 kOhm
+- Alt değer: 22.0 kOhm
+- VOLTAGE_DIV_COF = (11.50 + 22.0) / 22.0
+- Yaklaşık katsayı: 1.5227
+
+Referans ölçümü:
+- Dahili VREFINT kanalı kullanılıyor
+- Fabrika kalibrasyon değeri VREFINT_CAL adresinden okunuyor
+- Tipik gözlenen VREFINT_CAL değeri: 1510
+- VDDA hesabı:
+
+    VDDA[mV] = 3300 * VREFINT_CAL / VREFINT_RAW
+
+ADC pin gerilimi:
+
+    Vpin[mV] = ADC_RAW * VDDA[mV] / 4095
+
+Batarya gerilimi:
+
+    VBAT[mV] = Vpin[mV] * VOLTAGE_DIV_COF
+
+
+======================================================================
+3. BAŞLANGIÇTA GÖZLENEN PROBLEM
+======================================================================
+
+Batarya multimetre ile yaklaşık 3.53...3.57 V ölçülmesine rağmen yazılım
+zaman zaman yaklaşık 3.1...3.3 V seviyelerinde sonuç üretiyordu.
+
+Örnek problemli ölçüm:
+
+    raw_ch3      = 2771
+    vrefint_raw  = 1563
+    vrefint_cal  = 1510
+    vdda_mV      = 3188
+    batt_mV      = 3285
+
+Daha sonraki ölçümlerde VREFINT_RAW değerinin 1518...1614 ve bazı
+koşullarda 1700 üzeri değerlere çıkabildiği gözlendi. Buna karşılık
+batarya ADC kanalının ham değeri çok daha az değişiyordu.
+
+Bu durum, yalnızca direnç bölücü katsayısının hatalı olmadığını; ADC
+referans ölçümü ve ADC çalışma şeklinin ayrıca incelenmesi gerektiğini
+gösterdi.
+
+Fiziksel doğrulama sırasında yaklaşık olarak şu değerler ölçüldü:
+
+    VBAT          : 3.53 V civarı
+    PB4 / ADC_IN3 : 2.34 V civarı
+    3V3 / VDDA    : 3.20...3.30 V civarı
+
+Bu değerler kullanıldığında PB4 için beklenen 12-bit ADC kodunun yaklaşık
+2900 civarında olması gerektiği görüldü. Dolayısıyla ilk loglarda görülen
+2770 civarındaki değerlerin ve özellikle hatalı VREFINT ölçümlerinin
+araştırılması gerektiği belirlendi.
+
+
+======================================================================
+4. TEŞHİS SÜRECİNDE BULUNAN ADC KONFİGÜRASYON PROBLEMLERİ
+======================================================================
+
+4.1 SamplingTime alanının yanlış yorumlanması
+---------------------------------------------
+
+STM32WL ADC yapısında kanal konfigürasyonundaki sConfig.SamplingTime alanı,
+doğrudan ADC_SAMPLETIME_xxxCYCLES_5 sabitini değil, kullanılacak ortak
+sampling grubunu seçen ADC_SAMPLINGTIME_COMMON_1 veya
+ADC_SAMPLINGTIME_COMMON_2 değerini beklemektedir.
+
+İlk konfigürasyonda bu alana doğrudan cycle sabiti verilmesi nedeniyle
+istenen sampling grubu açık biçimde seçilmiyordu. Bu hata derleme sırasında
+yakalanmıyordu.
+
+Düzeltme:
+
+    hadc.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_160CYCLES_5;
+    hadc.Init.SamplingTimeCommon2 = ADC_SAMPLETIME_160CYCLES_5;
+
+ve kanal seçimlerinde:
+
+    sConfig.SamplingTime = ADC_SAMPLINGTIME_COMMON_2;
+
+kullanıldı.
+
+CH3, VREFINT ve sıcaklık kanallarının tamamında aynı yaklaşım uygulandı.
+Her iki ortak grubun da 160.5 cycle olarak ayarlanması, yanlış grup seçimi
+riskini de pratik olarak ortadan kaldırdı.
+
+
+4.2 VREFINT'in tek örnek ile ölçülmesi
+--------------------------------------
+
+İlk uygulamada batarya kanalı birden fazla kez okunurken VREFINT yalnızca
+bir kez okunuyordu.
+
+Bu yapı şu probleme neden oluyordu:
+- Kanal değişiminden hemen sonraki ilk örnek doğrudan kullanılıyordu.
+- VREFINT yolunun ve ADC örnekleme kapasitesinin oturması için yeterli
+  örnek geçmişi oluşmuyordu.
+- Tek bir hatalı VREFINT örneği doğrudan VDDA hesabına giriyordu.
+- VDDA hatası daha sonra batarya gerilimi hesabına çarpan olarak
+  aktarılıyordu.
+
+Sonuç olarak VREFINT_RAW değerindeki küçük/orta büyüklükteki sapmalar
+batarya sonucunda yüzlerce mV hata oluşturabiliyordu.
+
+Düzeltme:
+- Kanal seçiminden sonra kısa settle süresi verildi.
+- İlk 5 ADC dönüşümü discard edildi.
+- Sonraki 16 dönüşüm ortalandı.
+
+Final yaklaşım:
+
+    VREF = ADC_ReadAverage(5, 16);
+    AD_RES = ADC_ReadAverage(5, 16);
+
+Sıcaklık kanalı için de ilk örneklerin atılması yaklaşımı kullanıldı.
+
+
+4.3 Her örnekten sonra HAL_ADC_Stop() çağrılması
+------------------------------------------------
+
+İlk ADC_ReadAverage() denemesinde her dönüşümden sonra HAL_ADC_Stop()
+çağrılıyordu.
+
+Bu durumda yapılan "ilk 5 örneği at, sonraki 16 örneği kullan" işlemi
+amacına tam ulaşmıyordu. ADC her çevrimde durdurulduğu için her yeni örnek
+yeniden ADC'nin başlatılmasından sonraki ilk dönüşümlerden biri haline
+geliyordu.
+
+Özellikle dahili VREFINT ölçümünde bunun önemli olduğu gözlendi.
+
+Düzeltme:
+- ADC örnekleme serisi boyunca aktif bırakıldı.
+- Her örnek için HAL_ADC_Start() ve conversion polling yapıldı.
+- HAL_ADC_Stop() yalnızca tüm discard + average serisi bittikten sonra
+  bir kez çağrıldı.
+
+Final mantık:
+
+    for (...)
+    {
+        HAL_ADC_Start(&hadc);
+        HAL_ADC_PollForConversion(&hadc, 1000);
+        raw = HAL_ADC_GetValue(&hadc);
+
+        if (i >= discardCount)
+            sum += raw;
+    }
+
+    HAL_ADC_Stop(&hadc);
+
+
+4.4 LowPowerAutoWait ayarı
+--------------------------
+
+Başlangıç ayarı:
+
+    hadc.Init.LowPowerAutoWait = ENABLE;
+
+Batarya ölçümü, manuel yazılım tetiklemeli ve seyrek yapılan bir ölçüm
+olduğu için teşhis sırasında ADC davranışını daha deterministik hale
+getirmek amacıyla AutoWait kapatıldı.
+
+Final ayar:
+
+    hadc.Init.LowPowerAutoWait = DISABLE;
+
+
+4.5 TriggerFrequencyMode ayarı
+------------------------------
+
+Başlangıçta:
+
+    hadc.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_HIGH;
+
+kullanılıyordu.
+
+Batarya ADC ölçümü yüksek frekanslı ardışık harici trigger akışı değil,
+yazılım kontrollü ve seyrek bir ölçüm olduğundan final konfigürasyonda:
+
+    hadc.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_LOW;
+
+kullanıldı.
+
+
+======================================================================
+5. FINAL ADC KONFİGÜRASYONU
+======================================================================
+
+Final konfigürasyonda kritik parametreler aşağıdaki hale getirildi:
+
+    hadc.Instance = ADC;
+    hadc.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
+    hadc.Init.Resolution = ADC_RESOLUTION_12B;
+    hadc.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+    hadc.Init.ScanConvMode = ADC_SCAN_DISABLE;
+    hadc.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+
+    hadc.Init.LowPowerAutoWait = DISABLE;
+    hadc.Init.LowPowerAutoPowerOff = DISABLE;
+
+    hadc.Init.ContinuousConvMode = DISABLE;
+    hadc.Init.NbrOfConversion = 1;
+    hadc.Init.DiscontinuousConvMode = DISABLE;
+
+    hadc.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+    hadc.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+
+    hadc.Init.DMAContinuousRequests = DISABLE;
+    hadc.Init.Overrun = ADC_OVR_DATA_PRESERVED;
+
+    hadc.Init.SamplingTimeCommon1 = ADC_SAMPLETIME_160CYCLES_5;
+    hadc.Init.SamplingTimeCommon2 = ADC_SAMPLETIME_160CYCLES_5;
+
+    hadc.Init.OversamplingMode = DISABLE;
+    hadc.Init.TriggerFrequencyMode = ADC_TRIGGER_FREQ_LOW;
+
+Her kanal için:
+
+    sConfig.Rank = ADC_REGULAR_RANK_1;
+    sConfig.SamplingTime = ADC_SAMPLINGTIME_COMMON_2;
+
+kullanıldı.
+
+Ölçüm öncesinde ayrıca:
+
+    HAL_ADCEx_Calibration_Start(&hadc);
+
+ile ADC kalibrasyonu çalıştırıldı.
+
+
+======================================================================
+6. FINAL ÖLÇÜM AKIŞI
+======================================================================
+
+Final batarya ölçüm akışı aşağıdaki hale getirildi:
+
+1. ADC initialize edilir.
+2. Batarya direnç bölücüsü aktif edilir.
+3. Bölücünün ve ADC giriş düğümünün oturması için 100 ms beklenir.
+4. ADC internal calibration çalıştırılır.
+5. Fabrika VREFINT_CAL değeri okunur.
+6. VREFINT kanalı seçilir.
+7. Kısa settle süresi uygulanır.
+8. İlk 5 VREFINT dönüşümü atılır.
+9. Sonraki 16 VREFINT dönüşümü ortalanır.
+10. VREFINT_CAL / VREFINT_RAW oranından gerçek VDDA hesaplanır.
+11. ADC_IN3 / PB4 seçilir.
+12. İlk 5 CH3 dönüşümü atılır.
+13. Sonraki 16 CH3 dönüşümü ortalanır.
+14. Ham ADC değerinden PB4 gerilimi hesaplanır.
+15. Gerilim bölücü katsayısı uygulanarak batarya mV değeri elde edilir.
+16. ADC ve batarya bölücü kapatılır.
+
+
+======================================================================
+7. TEŞHİSİ DOĞRULAYAN ARA ÖLÇÜM
+======================================================================
+
+VREFINT'in tek tek loglandığı teşhis sürümünde aşağıdaki sıra gözlendi:
+
+    VREF[0]  = 1517  DISCARD
+    VREF[1]  = 1519  DISCARD
+    VREF[2]  = 1521  DISCARD
+    VREF[3]  = 1522  DISCARD
+    VREF[4]  = 1523  DISCARD
+    VREF[5]  = 1524  USE
+    VREF[6]  = 1525  USE
+    ...
+    VREF[20] = 1527  USE
+
+Bu ölçüm, kanal/ADC ilk devreye alındığında ilk birkaç dönüşümün kademeli
+olarak oturduğunu ve ilk örneklerin atılmasının doğru bir yaklaşım olduğunu
+gösterdi.
+
+Aynı çevrimin final sonucu:
+
+    raw_ch3      = 2883
+    vrefint_raw  = 1526
+    vrefint_cal  = 1510
+    vdda_mV      = 3265
+    adc_pin_mV   = 2299
+    batt_mV      = 3501
+
+Bu sonuç, önceki 3.1...3.3 V seviyesindeki hatalı ve dağınık batarya
+ölçümlerine göre belirgin bir iyileşmeydi.
+
+
+======================================================================
+8. UZUN SÜRELİ SONUÇ GÖZLEMİ
+======================================================================
+
+Düzeltmelerden sonra temiz ve fiziksel bağlantının stabil olduğu uzun
+çalışma bölümünde ADC değerlerinin kararlı hale geldiği gözlendi.
+
+Tipik ölçümler:
+
+    raw          : yaklaşık 2892...2899
+    vref         : yaklaşık 1508...1510
+    VDDA         : yaklaşık 3300...3304 mV
+    ADC pin      : yaklaşık 2331...2339 mV
+    Batarya      : yaklaşık 3549...3562 mV
+
+Örnekler:
+
+    raw=2892, vref=1510, vdda=3300 mV,
+    pin=2331 mV, bat=3549 mV
+
+    raw=2899, vref=1509, vdda=3302 mV,
+    pin=2338 mV, bat=3560 mV
+
+Bu değerler, multimetre ile gözlenen yaklaşık 3.53...3.57 V batarya
+seviyesi ile uyumludur.
+
+Özellikle VREFINT tarafında başlangıçta görülen 1600...1700+ seviyesine
+çıkan kararsız sonuçların temiz test koşullarında ortadan kalkması,
+uygulanan ADC acquisition değişikliklerinin etkili olduğunu doğrulamıştır.
+
+
+======================================================================
+9. KÖK NEDEN DEĞERLENDİRMESİ
+======================================================================
+
+Problem tek bir hata yerine birkaç ADC kullanım detayının birleşiminden
+oluşmuştur.
+
+Ana nedenler:
+
+1. STM32WL ADC sampling-time yapısında kanalın doğrudan cycle sabiti ile
+   değil COMMON_1 / COMMON_2 sampling grubu ile ilişkilendirilmesi
+   gerektiğinin ilk konfigürasyonda yanlış uygulanması.
+
+2. VREFINT ölçümünün yalnız tek ADC örneğine dayanması.
+
+3. Kanal değişiminden sonraki ilk dönüşümlerin doğrudan kullanılması.
+
+4. Çoklu örnekleme sırasında ADC'nin her conversion sonrası
+   HAL_ADC_Stop() ile durdurulması.
+
+5. Seyrek, yazılım tetiklemeli ADC kullanımına göre gereksiz/uygunsuz
+   LowPowerAutoWait ve HIGH TriggerFrequencyMode konfigürasyonu.
+
+En kritik sonuç, VDDA'nın yalnız tek ve kararsız bir VREFINT örneğinden
+hesaplanmasının batarya gerilimi hesabında büyük sapmaya neden olmasıdır.
+
+
+======================================================================
+10. ÇÖZÜMÜN MÜHENDİSLİK AÇISINDAN DEĞERLENDİRİLMESİ
+======================================================================
+
+Yapılan çözüm yalnızca sayısal bir kalibrasyon katsayısı ekleyerek sonucu
+"doğru göstermeye" çalışmamıştır. Öncelikle ADC ham verisinin, referans
+ölçümünün ve fiziksel multimetre ölçümlerinin birbiriyle tutarlılığı
+kontrol edilmiştir.
+
+Bu nedenle çözüm şu sırayla gerçekleştirilmiştir:
+
+- Fiziksel VBAT, ADC pin ve 3V3 ölçümleri doğrulandı.
+- ADC ham kodu beklenen teorik değer ile karşılaştırıldı.
+- VREFINT ham değeri ayrı loglandı.
+- Fabrika VREFINT_CAL değerinin stabil olduğu doğrulandı.
+- ADC sampling konfigürasyonu incelendi.
+- Kanal değişimlerinden sonraki ilk örnekler elendi.
+- VREFINT ve CH3 çoklu örnekleme ile ortalandı.
+- ADC'nin örnek serisi boyunca aktif kalması sağlandı.
+- ADC çalışma modu seyrek yazılım tetiklemeli ölçüme uygun hale getirildi.
+- Uzun süreli log ile son durum doğrulandı.
+
+Bu yaklaşım sayesinde gerilim bölücü katsayısını rastgele değiştirerek
+semptomu maskelemeden, ölçüm zincirinin gerçek problemi giderilmiştir.
+
+
+======================================================================
+11. SONUÇ
+======================================================================
+
+STM32WLE5 tabanlı batarya ADC ölçümünde başlangıçta yaklaşık 3.53 V gerçek
+batarya gerilimine karşı 3.1...3.3 V seviyelerine kadar düşebilen ve
+ölçümden ölçüme değişen sonuçlar gözlenmiştir.
+
+Yapılan inceleme sonucunda problemin temel olarak ADC referans ölçüm
+zincirinden ve ADC konfigürasyon/örnekleme kullanımından kaynaklandığı
+belirlenmiştir.
+
+Uygulanan başlıca düzeltmeler:
+
+- COMMON sampling grubu seçimi düzeltildi.
+- COMMON_1 ve COMMON_2 160.5 cycle olarak ayarlandı.
+- VREFINT tek örnek yerine discard + average yöntemi ile ölçüldü.
+- CH3 için de aynı discard + average yöntemi uygulandı.
+- ADC, örnekleme serisi boyunca aktif tutuldu.
+- LowPowerAutoWait kapatıldı.
+- TriggerFrequencyMode LOW yapıldı.
+- ADC calibration ölçüm öncesinde çalıştırıldı.
+- Ham ADC, VREF, VDDA, ADC pin ve batarya değerleri ayrı ayrı gözlemlendi.
+
+Düzeltmeler sonrasında temiz test koşullarında:
+
+- VREFINT yaklaşık 1508...1510,
+- VDDA yaklaşık 3.300...3.304 V,
+- ADC pin gerilimi yaklaşık 2.331...2.339 V,
+- Batarya gerilimi yaklaşık 3.549...3.562 V
+
+aralığında stabil hale gelmiştir.
+
+Sonuç olarak batarya ADC ölçüm problemi yazılım/ADC acquisition seviyesinde
+çözülmüş ve ölçüm sonucu fiziksel multimetre ölçümleriyle uyumlu hale
+gelmiştir.
+
+======================================================================
+RAPOR SONU
+======================================================================

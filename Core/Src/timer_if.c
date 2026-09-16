@@ -100,6 +100,18 @@ const UTIL_SYSTIM_Driver_s UTIL_SYSTIMDriver =
   */
 #define RTC_BKP_MSBTICKS   RTC_BKP_DR2
 
+/**
+  * @brief Backup register + magic deger: MSBticks'in GERCEKTEN ilk kez
+  *        (backup domain guc kaybi sonrasi) sifirlandigini isaretler.
+  *        bkz. TIMER_IF_Init() icindeki kullanim yorumu ve
+  *        external_libs/lora_app_auxilary/Src/lora_timesync.c'deki ayni
+  *        desen (LORA_TIMESYNC_BKP_MAGIC_REG). Kullanilan diger backup
+  *        register'lar: DR0/DR1 (SysTime), DR2 (MSBticks), DR3 (timesync
+  *        SYNC), DR4 (STATUS interval carpani) - bu yuzden DR5.
+  */
+#define RTC_BKP_MSBTICKS_MAGIC_REG   RTC_BKP_DR5
+#define RTC_BKP_MSBTICKS_MAGIC_VAL   0x4D534254UL /* ascii "MSBT" */
+
 /* #define RTIF_DEBUG */
 
 /**
@@ -198,8 +210,27 @@ UTIL_TIMER_Status_t TIMER_IF_Init(void)
 
     /*Enable Direct Read of the calendar registers (not through Shadow) */
     HAL_RTCEx_EnableBypassShadow(&hrtc);
-    /*Initialize MSB ticks*/
-    TIMER_IF_BkUp_Write_MSBticks(0);
+    /* USER CODE BEGIN TIMER_IF_Init_MSBticks */
+    /* MSBticks'i SADECE gercek bir ilk acilista (backup domain guc kaybi
+     * sonrasi) sifirla. RTC_Initialized bir RAM bayragi oldugundan HER
+     * reset'te (soft reset, watchdog, brown-out) false'a doner ve bu blok
+     * her seferinde calisir - stok CubeMX kodu MSBticks'i burada KOSULSUZ
+     * sifirliyordu (bkz orijinal "TIMER_IF_BkUp_Write_MSBticks(0);" satiri).
+     * RTC'nin 32-bit sayaci en az bir kez tur attiktan sonra (~48,5 gun,
+     * RTC_N_PREDIV_S=10 -> 1024 tick/sn) gelen herhangi bir soft/watchdog
+     * reset'te bu, cihaz saatini o kadar geriye sarardi - backup domain'de
+     * (soft reset'te silinmeyen) ayri bir "gercekten ilk kez" bayragiyla
+     * koruyoruz; ayni desen lora_timesync.c'deki SYNC magic'te de
+     * kullaniliyor. NOT: sahada gozlemlenen ~26 saatlik geriye sicrama
+     * olayi (docs/... log analizi) bu spesifik hatadan KAYNAKLANMIYORDU
+     * (oturum suresi 48,5 gunun cok altinda) - bu, ayri, uzun vadeli bir
+     * risk olarak tespit edilip duzeltildi. */
+    if (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_MSBTICKS_MAGIC_REG) != RTC_BKP_MSBTICKS_MAGIC_VAL)
+    {
+      TIMER_IF_BkUp_Write_MSBticks(0);
+      HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_MSBTICKS_MAGIC_REG, RTC_BKP_MSBTICKS_MAGIC_VAL);
+    }
+    /* USER CODE END TIMER_IF_Init_MSBticks */
 
     TIMER_IF_SetTimerContext();
 

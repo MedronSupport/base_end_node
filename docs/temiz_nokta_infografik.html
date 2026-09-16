@@ -94,6 +94,59 @@
   .ring{background:linear-gradient(180deg,#FFFFFF,#F8FBFF);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:20px}
   .ring svg{width:100%;height:auto;display:block;max-width:1100px;margin:0 auto}
 
+
+  /* ---------- Bidirectional communication ---------- */
+  .duplex-card{background:linear-gradient(180deg,#FFFFFF,#F7FAFF);border:1px solid rgba(24,119,242,.12);border-radius:var(--r-lg);box-shadow:var(--shadow);padding:28px;overflow:hidden}
+  .duplex-flow{display:grid;grid-template-columns:minmax(150px,1fr) minmax(120px,.75fr) minmax(150px,1fr) minmax(120px,.75fr) minmax(170px,1fr);align-items:center;gap:10px}
+  .duplex-node{background:#fff;border:1px solid var(--line);border-radius:18px;min-height:150px;padding:18px 16px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:9px;box-shadow:0 10px 28px -24px rgba(24,119,242,.45)}
+  .duplex-node .node-icon{width:58px;height:58px;border-radius:18px;background:var(--blue-soft);display:grid;place-items:center}
+  .duplex-node svg{width:34px;height:34px;stroke:var(--teal);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+  .duplex-node b{font-size:16px;color:var(--ink)}
+  .duplex-node small{font-size:12px;color:var(--ink-2);line-height:1.4;max-width:19ch}
+  .duplex-link{display:flex;flex-direction:column;gap:18px;min-width:0}
+  .duplex-arrow{display:grid;grid-template-columns:1fr auto;align-items:center;gap:7px;font-size:10.5px;font-weight:800;color:#0B5FCC;white-space:nowrap}
+  .duplex-arrow::before{content:"";height:2px;background:linear-gradient(90deg,#9CC9FA,#1877F2);border-radius:99px}
+  .duplex-arrow::after{content:"›";font-size:24px;line-height:1;color:#1877F2;margin-left:-12px}
+  .duplex-arrow.back{direction:rtl;color:#58718E}
+  .duplex-arrow.back::before{background:linear-gradient(90deg,#AABBCD,#6F8EAE)}
+  .duplex-arrow.back::after{content:"‹";color:#6F8EAE;margin-left:0;margin-right:-12px}
+  .duplex-legend{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:24px}
+  .duplex-note{border-radius:16px;padding:15px 17px;background:#F1F7FF;border:1px solid #D8E8FA}
+  .duplex-note.down{background:#F8FAFC;border-color:#DFE7EF}
+  .duplex-note b{display:block;font-size:14px;margin-bottom:4px}
+  .duplex-note span{font-size:13px;color:var(--ink-2)}
+  .command-chips{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;margin-top:18px}
+  .command-chips span{font-size:12px;font-weight:700;color:#174F87;background:#EAF3FF;border:1px solid #CFE2F8;padding:7px 10px;border-radius:999px}
+
+  /* ---------- Dashboard report state ---------- */
+  .tabs button{appearance:none;border:0;background:transparent;color:inherit;font:inherit;font-weight:700;padding:5px 2px 8px;border-bottom:2px solid transparent;white-space:nowrap;text-align:center;min-width:0;letter-spacing:.01em;cursor:pointer}
+  .tabs button.on{color:#FFFFFF;border-bottom-color:#7CC2FF;background:rgba(255,255,255,.08);border-top-left-radius:8px;border-top-right-radius:8px}
+  .tabs button[aria-disabled="true"]{cursor:default;opacity:.72}
+  .dash-panel{display:flex;flex-direction:column;gap:10px;min-height:283px}
+  .dash-panel[hidden]{display:none}
+  .report-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .report-title b{display:block;font-size:14px;color:#fff}.report-title small{color:#AFC2D4;font-size:10.5px}
+  .date-pill{font-size:10px;font-weight:700;color:#DDEBFF;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);padding:5px 8px;border-radius:99px}
+  .report-kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .report-kpi{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.05);border-radius:9px;padding:7px 8px}
+  .report-kpi small{display:block;color:#9FB4C8;font-size:9.5px}.report-kpi b{font-size:14px;color:#fff}
+  .report-list{display:flex;flex-direction:column;gap:5px}
+  .report-row{display:grid;grid-template-columns:42px 1fr auto;gap:7px;align-items:center;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.04);border-radius:8px;padding:6px 8px}
+  .report-row time{color:#fff;font-size:10.5px;font-weight:800}.report-row span{color:#DDE8F1;font-size:10.5px}.report-row em{font-style:normal;color:#8FD2FF;font-size:9.5px;font-weight:700}
+  .report-action{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid rgba(255,255,255,.08);padding-top:8px;margin-top:auto}
+  .report-action button{border:1px solid rgba(124,194,255,.45);background:rgba(124,194,255,.12);color:#EAF6FF;border-radius:8px;padding:7px 9px;font:inherit;font-size:10.5px;font-weight:800;cursor:pointer}
+  .report-action small{color:#AFC2D4;font-size:9.5px;text-align:right;max-width:145px}
+
+  /* ---------- Reliability strip ---------- */
+  .reliability-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .reliability-card{background:#fff;border:1px solid rgba(24,119,242,.12);border-radius:18px;box-shadow:0 14px 34px -28px rgba(24,119,242,.55);padding:20px;display:grid;grid-template-columns:auto 1fr;gap:13px;align-items:start}
+  .reliability-icon{width:45px;height:45px;border-radius:14px;background:var(--blue-soft);display:grid;place-items:center;color:var(--teal);font-weight:800}
+  .reliability-icon svg{width:24px;height:24px;stroke:var(--teal);fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  .reliability-copy .mini-num{display:block;font-size:10px;font-weight:800;letter-spacing:.1em;color:#7FAEE2;margin-bottom:2px}
+  .reliability-copy h3{font-size:16px;font-weight:800;margin-bottom:5px}
+  .reliability-copy p{font-size:13px;color:var(--ink-2)}
+  .reliability-copy strong{display:inline-block;margin-top:7px;font-size:11.5px;color:#0B5FCC;background:#EDF5FF;padding:4px 7px;border-radius:7px}
+
   /* Features */
   .features{display:flex;flex-direction:column;gap:22px}
   .feature-row{width:88%;display:grid;grid-template-columns:minmax(300px,.95fr) minmax(0,1.25fr);background:var(--paper-2);border:1px solid rgba(24,119,242,.10);border-radius:var(--r-lg);box-shadow:var(--shadow);overflow:hidden;min-height:215px}
@@ -134,6 +187,12 @@
     .feature-row{width:100%;margin-left:0!important;margin-right:0!important;grid-template-columns:1fr 1.2fr}
     .stats{grid-template-columns:1fr}
     .sec-head{grid-template-columns:1fr}
+    .duplex-flow{grid-template-columns:1fr;gap:10px}
+    .duplex-link{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .duplex-arrow{min-height:32px}
+    .duplex-arrow.back{direction:ltr}
+    .duplex-legend{grid-template-columns:1fr}
+    .reliability-grid{grid-template-columns:1fr}
   }
   @media (max-width:680px){
     .feature-row{grid-template-columns:1fr}
@@ -142,6 +201,9 @@
     .feature-art svg{min-height:180px}
     .feat{padding:24px 22px}
     .tabs{font-size:9px}
+    .duplex-card{padding:18px}
+    .duplex-node{min-height:125px}
+    .report-kpis{grid-template-columns:1fr 1fr 1fr}
   }
   @media (max-width:560px){.page{padding:22px 16px 60px}}
   @media (prefers-reduced-motion:reduce){
@@ -193,7 +255,7 @@
           <circle r="22" fill="#fff" stroke="#1877F2" stroke-width="2.5"/>
           <path d="M-9 4a12 12 0 0 1 18 0M-5 8a6 6 0 0 1 10 0M-13 0a18 18 0 0 1 26 0" fill="none" stroke="#1877F2" stroke-width="2.2" stroke-linecap="round"/>
           <circle cy="11" r="2.2" fill="#1877F2"/>
-          <text y="46" text-anchor="middle" font-size="12" font-weight="800" fill="#0B5FCC">LoraWAN Gateway</text>
+          <text y="46" text-anchor="middle" font-size="12" font-weight="800" fill="#0B5FCC">LoRaWAN Gateway</text>
           <circle id="gwPulse" r="22" fill="none" stroke="#67AFFF" stroke-width="3" opacity="0"/>
         </g>
 
@@ -221,17 +283,45 @@
       </div>
 
       <aside class="dash" aria-live="polite">
-        <nav class="tabs" aria-label="Dashboard sekmeleri"><span class="on">Canlı takip</span><span>Raporlama</span><span>Mesai analizi</span><span>Isı haritası</span></nav>
-        <div class="top">
-          <div class="who"><i>AK</i><div><b>Ayşe Kaya</b><small>Kat görevlisi · 2. kat &nbsp;▾</small></div></div>
-          <span class="clock" id="clock">09:00</span>
+        <nav class="tabs" aria-label="Dashboard sekmeleri">
+          <button type="button" class="on" data-dash-tab="live">Canlı takip</button>
+          <button type="button" data-dash-tab="report">Raporlama</button>
+          <button type="button" aria-disabled="true">Mesai analizi</button>
+          <button type="button" aria-disabled="true">Isı haritası</button>
+        </nav>
+        <div class="dash-panel" id="livePanel">
+          <div class="top">
+            <div class="who"><i>AK</i><div><b>Ayşe Kaya</b><small>Kat görevlisi · 2. kat &nbsp;▾</small></div></div>
+            <span class="clock" id="clock">09:00</span>
+          </div>
+          <div class="kpis">
+            <div class="kpi"><small>Bugün temizlenen</small><strong id="kCount">0 oda</strong></div>
+            <div class="kpi"><small>Cihaz pili</small><strong class="batt"><i id="battBar" style="--lvl:94%"></i><span id="battTxt">%94</span></strong></div>
+          </div>
+          <div class="feed" id="feed"><div class="empty">Henüz bildirim yok. Vardiya 09:00'da başlıyor.</div></div>
+          <div class="legend">Yeşil: merkeze ulaştı ve teyit edildi. Turuncu: cihazda bekliyor, bağlantı gelince kendiliğinden gönderilir.</div>
         </div>
-        <div class="kpis">
-          <div class="kpi"><small>Bugün temizlenen</small><strong id="kCount">0 oda</strong></div>
-          <div class="kpi"><small>Cihaz pili</small><strong class="batt"><i id="battBar" style="--lvl:94%"></i><span id="battTxt">%94</span></strong></div>
+        <div class="dash-panel" id="reportPanel" hidden>
+          <div class="report-head">
+            <div class="report-title"><b>Geçmiş oda ziyaretleri</b><small>Denetim ve performans görünümü</small></div>
+            <span class="date-pill">10–11 Eyl</span>
+          </div>
+          <div class="report-kpis">
+            <div class="report-kpi"><small>Ziyaret</small><b>42</b></div>
+            <div class="report-kpi"><small>Oda</small><b>6</b></div>
+            <div class="report-kpi"><small>Personel</small><b>2</b></div>
+          </div>
+          <div class="report-list">
+            <div class="report-row"><time>09:12</time><span>Oda 203 · Ayşe Kaya</span><em>Teyitli</em></div>
+            <div class="report-row"><time>09:43</time><span>Oda 205 · Ayşe Kaya</span><em>Teyitli</em></div>
+            <div class="report-row"><time>10:06</time><span>Oda 201 · Mehmet A.</span><em>Teyitli</em></div>
+            <div class="report-row"><time>10:38</time><span>Oda 204 · Mehmet A.</span><em>Teyitli</em></div>
+          </div>
+          <div class="report-action">
+            <button type="button" id="historyRequest">Cihazdan geçmiş kayıt iste</button>
+            <small id="historyState">Tarih aralığına göre sorgu başlatılabilir.</small>
+          </div>
         </div>
-        <div class="feed" id="feed"><div class="empty">Henüz bildirim yok. Vardiya 09:00'da başlıyor.</div></div>
-        <div class="legend">Yeşil: merkeze ulaştı ve teyit edildi. Turuncu: cihazda bekliyor, bağlantı gelince kendiliğinden gönderilir.</div>
       </aside>
     </div>
   </div>
@@ -280,6 +370,37 @@
 <text x="620" y="400" text-anchor="middle" font-family="Manrope,sans-serif" font-size="21" font-weight="800" fill="#163A63">Dokun → Onayla → Gönder → Teyit al</text>
 <text x="620" y="428" text-anchor="middle" font-family="Manrope,sans-serif" font-size="14" fill="#58718E">Sonraki odada baştan başlar</text>
 </svg></div>
+  </section>
+
+  <!-- ================= BIDIRECTIONAL ================= -->
+  <section>
+    <div class="sec-head">
+      <h2>Sadece veri göndermez; merkezden komut da alır</h2>
+      <p>Temiz Nokta çift yönlü çalışır. Cihaz oda ziyaretlerini ve durum bilgisini merkeze taşırken, yönetim ekranından gönderilen komutlar da cihaza ulaştırılır.</p>
+    </div>
+    <div class="duplex-card">
+      <div class="duplex-flow" aria-label="Cihaz ile yönetim ekranı arasında çift yönlü LoRaWAN iletişimi">
+        <div class="duplex-node">
+          <div class="node-icon"><svg viewBox="0 0 32 32"><rect x="9" y="3" width="14" height="26" rx="4"/><path d="M12 8h8v10h-8z"/><circle cx="16" cy="24" r="1.3"/></svg></div>
+          <b>El cihazı</b><small>Oda ziyareti, pil ve durum bilgisi</small>
+        </div>
+        <div class="duplex-link"><div class="duplex-arrow">UPLINK</div><div class="duplex-arrow back">DOWNLINK</div></div>
+        <div class="duplex-node">
+          <div class="node-icon"><svg viewBox="0 0 32 32"><path d="M9 21a10 10 0 0 1 14 0M12 24a6 6 0 0 1 8 0M6 18a14 14 0 0 1 20 0"/><circle cx="16" cy="27" r="1.5"/><path d="M16 5v7"/></svg></div>
+          <b>LoRaWAN Gateway</b><small>Binanın tamamı için tek merkez noktası</small>
+        </div>
+        <div class="duplex-link"><div class="duplex-arrow">VERİ</div><div class="duplex-arrow back">KOMUT</div></div>
+        <div class="duplex-node">
+          <div class="node-icon"><svg viewBox="0 0 32 32"><rect x="3" y="5" width="26" height="18" rx="3"/><path d="M8 19l5-5 4 3 7-8M11 27h10M16 23v4"/></svg></div>
+          <b>Yönetim ekranı</b><small>Raporlama, sorgulama ve uzaktan ayar</small>
+        </div>
+      </div>
+      <div class="duplex-legend">
+        <div class="duplex-note"><b>Cihaz → Merkez</b><span>Oda ziyareti · pil bilgisi · bağlantı ve cihaz durumu</span></div>
+        <div class="duplex-note down"><b>Merkez → Cihaz</b><span>Uyarı başlat · geçmiş kayıt iste · ayar değiştir · saati eşitle</span></div>
+      </div>
+      <div class="command-chips"><span>🔔 Cihazı uyar</span><span>📋 Kayıt iste</span><span>⚙ Bildirim sıklığını değiştir</span><span>🕒 Saati eşitle</span></div>
+    </div>
   </section>
 
   <!-- ================= FEATURES ================= -->
@@ -363,6 +484,77 @@
           </svg>
         </div>
         <div class="feat"><span class="num">04</span><h3>Esnek tasarım imkânı</h3><p>Yeni oda, kat ya da bina eklemek bir kart yapıştırmaktan ibaret. Sistem sizinle birlikte büyür.</p></div>
+      </article>
+
+      <article class="feature-row">
+        <div class="feature-art" aria-hidden="true">
+          <svg viewBox="0 0 420 220">
+            <rect width="420" height="220" fill="#F1F7FF"/>
+            <rect x="42" y="39" width="120" height="142" rx="14" fill="#FFFFFF" stroke="#C9DEF5" stroke-width="2"/>
+            <rect x="55" y="54" width="94" height="50" rx="8" fill="#E9F3FF"/>
+            <path d="M72 80h60" stroke="#AECDED" stroke-width="5" stroke-linecap="round"/>
+            <rect x="70" y="119" width="64" height="28" rx="8" fill="#1877F2"/>
+            <path d="M83 133h38" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+            <path d="M174 110h67" stroke="#1877F2" stroke-width="3" stroke-dasharray="6 7"/>
+            <path d="M229 102l12 8-12 8" fill="none" stroke="#1877F2" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+            <rect x="266" y="61" width="60" height="100" rx="15" fill="#FFFFFF" stroke="#B9D3F0" stroke-width="2"/>
+            <rect x="277" y="75" width="38" height="48" rx="7" fill="#DCEEFF"/>
+            <circle cx="296" cy="143" r="6" fill="#163A63"/>
+            <circle cx="296" cy="111" r="43" fill="none" stroke="#F2A93B" stroke-width="3" opacity=".55"/>
+            <circle cx="296" cy="111" r="56" fill="none" stroke="#F2A93B" stroke-width="2" opacity=".25"/>
+            <path d="M344 88c13 8 20 18 22 31M348 78c20 11 31 27 34 47" fill="none" stroke="#F2A93B" stroke-width="4" stroke-linecap="round"/>
+            <path d="M278 59l6-14M296 55V38M314 59l8-14" stroke="#67AFFF" stroke-width="4" stroke-linecap="round"/>
+            <text x="210" y="196" text-anchor="middle" font-size="13" font-weight="800" fill="#0B5FCC">SES + IŞIKLI UYARI</text>
+          </svg>
+        </div>
+        <div class="feat"><span class="num">05</span><h3>Kaybolan cihazı uzaktan uyarın</h3><p>Yönetim ekranından cihazda sesli ve ışıklı uyarı başlatın. Uyarı belirlenen sürenin sonunda otomatik kapanır; cihaz gereksiz yere pil tüketmez.</p></div>
+      </article>
+
+      <article class="feature-row">
+        <div class="feature-art" aria-hidden="true">
+          <svg viewBox="0 0 420 220">
+            <rect width="420" height="220" fill="#EDF5FF"/>
+            <rect x="28" y="44" width="105" height="132" rx="13" fill="#FFFFFF" stroke="#CADFF4" stroke-width="2"/>
+            <rect x="42" y="58" width="77" height="18" rx="6" fill="#DDEEFF"/>
+            <path d="M49 67h14M89 67h22" stroke="#6FA7DF" stroke-width="3" stroke-linecap="round"/>
+            <rect x="43" y="90" width="75" height="14" rx="5" fill="#EEF5FC"/><rect x="43" y="112" width="75" height="14" rx="5" fill="#EEF5FC"/><rect x="43" y="134" width="75" height="14" rx="5" fill="#EEF5FC"/>
+            <path d="M144 110h54" stroke="#1877F2" stroke-width="3" stroke-dasharray="6 7"/><path d="M186 102l12 8-12 8" fill="none" stroke="#1877F2" stroke-width="3"/>
+            <rect x="211" y="57" width="64" height="106" rx="14" fill="#FFFFFF" stroke="#B9D3F0" stroke-width="2"/>
+            <rect x="222" y="71" width="42" height="55" rx="6" fill="#E3F0FF"/>
+            <path d="M230 89h26M230 99h22M230 109h17" stroke="#7AAEDE" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="243" cy="145" r="5" fill="#1877F2"/>
+            <path d="M286 110h48" stroke="#1877F2" stroke-width="3" stroke-dasharray="6 7"/><path d="M322 102l12 8-12 8" fill="none" stroke="#1877F2" stroke-width="3"/>
+            <rect x="342" y="50" width="58" height="118" rx="8" fill="#163A63"/>
+            <rect x="351" y="63" width="40" height="9" rx="3" fill="#67AFFF" opacity=".7"/>
+            <rect x="351" y="82" width="40" height="8" rx="3" fill="#67AFFF" opacity=".38"/>
+            <rect x="351" y="99" width="40" height="8" rx="3" fill="#67AFFF" opacity=".38"/>
+            <rect x="351" y="116" width="17" height="31" rx="3" fill="#67AFFF"/><rect x="373" y="126" width="8" height="21" rx="2" fill="#9CC9FA"/><rect x="385" y="109" width="6" height="38" rx="2" fill="#1877F2"/>
+            <text x="210" y="198" text-anchor="middle" font-size="13" font-weight="800" fill="#0B5FCC">TARİH ARALIĞI → KAYIT → RAPOR</text>
+          </svg>
+        </div>
+        <div class="feat"><span class="num">06</span><h3>Geçmiş kayıtları uzaktan sorgulayın</h3><p>Tarih aralığını seçin; cihazda saklanan oda ziyaret kayıtlarının merkeze aktarılmasını başlatın. Denetim ve performans raporlarında geçmiş hareketlere kolayca ulaşın.</p></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- ================= RELIABILITY ================= -->
+  <section>
+    <div class="sec-head">
+      <h2>Sistem arka planda kendini yönetir</h2>
+      <p>Günlük kullanımda görünmeyen bu mekanizmalar, saat doğruluğunu, bağlantı sürekliliğini ve cihaz sağlığını korur.</p>
+    </div>
+    <div class="reliability-grid">
+      <article class="reliability-card">
+        <div class="reliability-icon"><svg viewBox="0 0 24 24"><path d="M4 18h16M6 15V8M12 15V5M18 15v-4"/><path d="M4 4h16"/></svg></div>
+        <div class="reliability-copy"><span class="mini-num">07</span><h3>Sağlık bildirimi uzaktan ayarlanır</h3><p>Pil ve bağlantı durumu için periyodik bildirim aralığı sahaya gitmeden değiştirilebilir.</p><strong>30 sn – 24 saat</strong></div>
+      </article>
+      <article class="reliability-card">
+        <div class="reliability-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v5l3 2"/><path d="M7 3l-2 2M17 3l2 2"/></svg></div>
+        <div class="reliability-copy"><span class="mini-num">08</span><h3>Saat otomatik senkronize olur</h3><p>Kayıtların zaman damgası merkez saatiyle eşitlenir ve RTC ile yeniden başlatmalarda korunur.</p><strong>Merkez saati + RTC</strong></div>
+      </article>
+      <article class="reliability-card">
+        <div class="reliability-icon"><svg viewBox="0 0 24 24"><path d="M20 7v5h-5"/><path d="M19 12a7 7 0 1 1-2-5"/><path d="M9 12l2 2 4-4"/></svg></div>
+        <div class="reliability-copy"><span class="mini-num">09</span><h3>Sorun olursa kendini toparlar</h3><p>Beklenmeyen bir donmada cihaz otomatik yeniden başlar ve gerektiğinde ağa tekrar katılmayı dener.</p><strong>Watchdog + otomatik rejoin</strong></div>
       </article>
     </div>
   </section>
@@ -449,6 +641,33 @@
   const battBar = document.getElementById('battBar');
   const battTxt = document.getElementById('battTxt');
   const metalHint = document.getElementById('metalHint');
+
+
+  // Dashboard tabs: keep live tracking active, but let the report view demonstrate
+  // server-side history queries without changing the visual language of the panel.
+  const dashTabs = Array.from(document.querySelectorAll('[data-dash-tab]'));
+  const livePanel = document.getElementById('livePanel');
+  const reportPanel = document.getElementById('reportPanel');
+  dashTabs.forEach(btn=>btn.addEventListener('click',()=>{
+    dashTabs.forEach(x=>x.classList.toggle('on',x===btn));
+    const report = btn.dataset.dashTab === 'report';
+    livePanel.hidden = report;
+    reportPanel.hidden = !report;
+  }));
+  const historyRequest = document.getElementById('historyRequest');
+  const historyState = document.getElementById('historyState');
+  if(historyRequest){
+    historyRequest.addEventListener('click',()=>{
+      historyRequest.textContent='İstek sıraya alındı';
+      historyRequest.disabled=true;
+      historyState.textContent='Cihazın uygun iletişim penceresinde komut iletilecek.';
+      setTimeout(()=>{
+        historyRequest.textContent='Cihazdan geçmiş kayıt iste';
+        historyRequest.disabled=false;
+        historyState.textContent='Tarih aralığına göre sorgu başlatılabilir.';
+      },5000);
+    });
+  }
 
   const wait = ms => new Promise(r=>setTimeout(r, ms/SPEED));
   const ease = t => t<.5 ? 2*t*t : -1+(4-2*t)*t;
