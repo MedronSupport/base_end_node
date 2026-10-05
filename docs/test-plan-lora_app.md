@@ -232,3 +232,27 @@ Her test: **Ön Koşul → Adımlar → Beklenen Sonuç**. UART log çıktısı 
 - **Arka plan:** Refactor öncesi bu dalda `rfid_data_pending_on_lora = false;` iki kez yazılıyordu (zararsız ama gereksiz); tekilleştirildi.
 - **Adımlar:** B2 senaryosunu (duty-cycle kısıtlaması) tetikle.
 - **Beklenen:** Davranışta gözle görülür bir fark olmamalı — bu test sadece "hiçbir yan etki yok" doğrulaması içindir, ayrı bir log beklenmez.
+
+---
+
+## L. MAC Meşgul Erteleme / RX Pencere Underflow Yaması / Batarya Önbelleği
+
+Arka plan: `docs/Sorunlar/mac_mesgul_rx_pencere_alttasma_sorunu.md`.
+
+### L1 — Yoğun buton testi (kilitlenme yok)
+- **Adımlar:** Cihaz joinliyken kart okutup butona art arda bas (≥ 15 okuma).
+- **Beklenen:** Her TX'ten sonra `RX_1`/`RX_2` veya `rxDone` + `Tx Data Rate` satırı; `SEND FAILED (-2)` kalıcı olarak görülmez; basımlar ACK beklerken `yeni okuma reddedildi` ile reddedilir.
+
+### L2 — MAC meşgulken okuma erteleme
+- **Adımlar:** STATUS veya IND ping TX'i sürerken butona bas.
+- **Beklenen:** `MAC mesgul (TX/RX penceresi), RFID okumasi ertelendi`, ardından `RFID okumasi N kez ertelendi, simdi basliyor`; sonrasında RX pencereleri normal açılır.
+
+### L3 — Pencere gecikmesi underflow koruması
+- **Beklenen:** RX1/RX2 zamanlayıcısı hiçbir durumda ≈ 4,29 milyar ms'e kurulmaz; gecikmiş `ProcessRadioTxDone()` durumunda pencere en az 1 ms ile kurulur (`RxWindowDelayAfterOffset`). Middleware yeniden üretildiyse yamanın durduğunu `LoRaMac.c`'de kontrol et.
+
+### L4 — Batarya ADC önbelleği
+- **Adımlar:** STATUS sonrası 10 dk içinde birkaç okuma yap; sonra 10 dk bekleyip bir okuma daha yap.
+- **Beklenen:** İlk okumalarda `BAT ADC` satırı yok; 10 dk sonraki ilk okumada tek `BAT ADC` satırı. Ölçüm < 2800 mV ise okuma reddedilir; ölçüm 0 (hata) ise engellenmez.
+
+### L5 — STATUS aralığı varsayılanı
+- **Beklenen:** Varsayılan STATUS periyodu 1 saat (`STATUS_INTERVAL_MULTIPLIER_DEFAULT = 120`); art arda iki STATUS arası ≈ 3600 sn, `sayac` 1 artar.

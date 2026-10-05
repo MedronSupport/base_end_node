@@ -81,6 +81,10 @@ Geçersiz parametreli komutlar (aralık dışı çarpan, start>end, çakışan s
 
 Cihaz çoğu zamanını Stop2 modunda geçirir; RFID okuma (~5-6 sn, timer ile sınırlı) ve status hazırlığı (ADC okuma, çok kısa) dışında Stop modu kilitlenmez.
 
+**MAC meşgul koruması:** RFID okuma görevi bloklayıcı olduğundan, bir LoRaWAN TX/RX döngüsü sürerken başlarsa `ProcessRadioTxDone()` gecikir ve RX pencere zamanlayıcıları `uint32` underflow ile hiç açılmazdı (kalıcı `SEND FAILED (-2)`, rejoin olmaması). Çözüm iki katmanlıdır: `ReadRFIDCard()` `LoRaMacIsBusy()` iken okumayı 300 ms aralıkla (en çok 40 kez) erteler; ayrıca `LoRaMac.c`'ye proje yaması olarak `RxWindowDelayAfterOffset()` eklendi (pencere gecikmesi ≥ 1 ms). **Middleware yeniden üretilirse bu yama tekrar uygulanmalı.** Detay: `docs/Sorunlar/mac_mesgul_rx_pencere_alttasma_sorunu.md`.
+
+**Batarya ölçümü önbelleği:** Düşük batarya koruması (< 2800 mV okumayı engeller) son ölçümü 10 dk önbelleğe alır; her kart okumasında ADC çalıştırılmaz (STATUS ölçümü de önbelleği besler).
+
 **IWDG (bağımsız watchdog)** `external_libs/watchdog/` üzerinden elle bağlandı — CubeMX `.ioc`'ta hiç etkinleştirilmedi, bilinçli bir tercih (regenerate tetiklenmesin diye):
 - Zaman aşımı: ~30 sn (LSI /256 prescaler, reload 3749) — donanım tavanına (~32,768 sn) ~2,77 sn pay bırakır.
 - **İki refresh noktası:** (1) `Core/Src/stm32_lpm_if.c` → `PWR_EnterStopMode()`, her Stop2 girişinde; (2) `external_libs/watchdog/`'un kendi kurduğu **bağımsız periyodik "kick" görevi** (~20 sn, `CFG_SEQ_Task_WatchdogKickEvent` — enerji tasarrufu için zaman aşımının ~2/3'ü kadar seyrek tutuluyor). İkincisi zorunlu: IWDG, Stop2 uykusu sırasında da (LSI'ye bağlı olduğu için) saymaya devam eder — cihaz bir sonraki olaya kadar (ör. periyodik status turu) zaman aşımından uzun kesintisiz uyursa, sadece Stop2-girişi refresh'i bir daha hiç çağrılmaz ve IWDG cihazı **gerçek bir donma olmadan** resetler (sahada gözlemlenen, düzeltilen gerçek bir bug — `SendBufferedRfidLogHandler`'ın ardından ~26 sn'de tekrarlayan reboot).
@@ -108,7 +112,7 @@ STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her m
 
 **Protokol ve süreç (`docs/` kökü):**
 - `docs/server-gelistirici-rehberi.md` — **sunucu geliştirici rehberi:** MQTT topic'leri, tüm uplink/downlink mesajlarının byte-seviyesi payload tabloları ve örnekleri, zaman senkron mekanizması, hata/red davranışları, buffer semantiği — kod referansı olmadan, saf protokol dokümantasyonu
-- `docs/test-plan-lora_app.md` — senaryo bazlı test planı (buffer, RFID/status ACK zincirleri, rejoin, LPM, zaman senkronu, refactor regresyonu)
+- `docs/test-plan-lora_app.md` — senaryo bazlı test planı (buffer, RFID/status ACK zincirleri, rejoin, LPM, zaman senkronu, refactor regresyonu, MAC meşgul erteleme/batarya önbelleği — bölüm L)
 - `docs/Ürünleştirmeye Yönelik Eylem-Plani_UYGULANDI.md` — ürüne dönüşme yol haritası ve buradan çıkan somut eylem maddeleri (komut protokolü, boş basımda RX penceresi, STATUS interval komutu, buzzer/LED komutu, tarih aralığı sorgusu) — **tümü uygulandı** (madde 1-5 ✅); her madde için değişen dosyalar ve test önerileri; ayrıca üretime çıkmadan önce çözülmesi gereken kritik riskler (paylaşılan anahtar, RDP, OTA/provisioning eksikliği, vb.)
 - `docs/temiz_nokta_infografik.html` — ürünün çalışma prensibini özetleyen, canlı SVG benzetimli HTML infografik (tarayıcıda açılarak görüntülenir — bkz. aşağıdaki not)
 
@@ -122,6 +126,7 @@ STM32CubeIDE projesi (`.cproject`/`.project`). `external_libs/` altındaki her m
 - `lorawan-devicetimereq-reference.md` — LoRaWAN DeviceTimeReq referansı
 - `milesight-ug63-lorawan-version-mismatch.md` — Milesight UG63 network server ile gözlemlenen LoRaWAN sürüm uyuşmazlığı (üretici cevabı bekleniyor)
 - `LoRaWAN RX Penceresi Sorunu.pdf`, `ack_alinamama_sorunu_ozet.txt` — RX penceresi/ACK alınamama sorunlarının log bazlı kök neden analizleri
+- `mac_mesgul_rx_pencere_alttasma_sorunu.md` — kalıcı `SEND FAILED (-2)` / rejoin olmaması sorununun kök neden analizi (RX pencere zamanlayıcı underflow + bloklayıcı RFID okuma) ve çözümü — **çözüldü**
 - `STM32WLE5_Batarya_ADC_Sorun_Teshisi_ve_Cozum_Raporu.txt` — batarya geriliminin ADC'de düşük/kararsız okunması sorununun tam teşhis ve çözüm raporu (kök neden: `ADC_ChannelConfTypeDef.SamplingTime` alanına yanlış tür sabit verilmesi + VREFINT'in tek örnekle ölçülmesi — **çözüldü**, bkz. `external_libs/adc_bat_meas/`)
 
 **Diğer:**

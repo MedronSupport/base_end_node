@@ -996,6 +996,22 @@ static void UpdateRxSlotIdleState( void )
     }
 }
 
+/* [PROJE DUZELTMESI - Middleware yerel yamasi] RX1/RX2 timer degeri =
+ * "pencere gecikmesi - txDone'dan beri gecen sure (offset)". ProcessRadioTxDone
+ * sequencer task'inda calistigi icin uzun suren (bloklayici) baska bir task
+ * yuzunden gecikirse offset, pencere gecikmesini asabilir; uint32 cikarma
+ * tasip ~gunlerce sonrasina kurulan timer RX penceresini hic acmaz, MAC sonsuza
+ * dek meşgul (TX_RUNNING) kalir (LmHandlerSend hep BUSY, rejoin imkansiz).
+ * Pencere zamani zaten gectiyse timer'i "hemen" (1 ms) tetikleyecek sekilde
+ * kisitliyoruz: RX1 gec de olsa acilip zaman asimina ugrar,
+ * HandleRadioRxErrorTimeout() RX2 zamani da gectigi icin MAC'i temiz sekilde
+ * MacDone'a tasir. NOT: Bu dosya CubeMX/CubeWL guncellemesiyle ezilirse yama
+ * yeniden uygulanmali. */
+static uint32_t RxWindowDelayAfterOffset( uint32_t delay, uint32_t offset )
+{
+    return ( delay > offset ) ? ( delay - offset ) : 1U;
+}
+
 static void ProcessRadioTxDone( void )
 {
     GetPhyParams_t getPhy;
@@ -1010,9 +1026,9 @@ static void ProcessRadioTxDone( void )
     // Setup timers
     CRITICAL_SECTION_BEGIN( );
     uint32_t offset = TimerGetCurrentTime( ) - TxDoneParams.CurTime;
-    TimerSetValue( &MacCtx.RxWindowTimer1, MacCtx.RxWindow1Delay - offset );
+    TimerSetValue( &MacCtx.RxWindowTimer1, RxWindowDelayAfterOffset( MacCtx.RxWindow1Delay, offset ) );
     TimerStart( &MacCtx.RxWindowTimer1 );
-    TimerSetValue( &MacCtx.RxWindowTimer2, MacCtx.RxWindow2Delay - offset );
+    TimerSetValue( &MacCtx.RxWindowTimer2, RxWindowDelayAfterOffset( MacCtx.RxWindow2Delay, offset ) );
     TimerStart( &MacCtx.RxWindowTimer2 );
     CRITICAL_SECTION_END( );
 #else
@@ -1021,9 +1037,9 @@ static void ProcessRadioTxDone( void )
         // Setup timers
         CRITICAL_SECTION_BEGIN( );
         uint32_t offset = TimerGetCurrentTime( ) - TxDoneParams.CurTime;
-        TimerSetValue( &MacCtx.RxWindowTimer1, MacCtx.RxWindow1Delay - offset );
+        TimerSetValue( &MacCtx.RxWindowTimer1, RxWindowDelayAfterOffset( MacCtx.RxWindow1Delay, offset ) );
         TimerStart( &MacCtx.RxWindowTimer1 );
-        TimerSetValue( &MacCtx.RxWindowTimer2, MacCtx.RxWindow2Delay - offset );
+        TimerSetValue( &MacCtx.RxWindowTimer2, RxWindowDelayAfterOffset( MacCtx.RxWindow2Delay, offset ) );
         TimerStart( &MacCtx.RxWindowTimer2 );
         CRITICAL_SECTION_END( );
     }

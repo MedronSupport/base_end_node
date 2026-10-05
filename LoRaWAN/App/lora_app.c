@@ -44,6 +44,7 @@
 #include "adc_bat_meas.h"
 #include "lora_timesync.h"
 #include "rtc.h"
+#include "LoRaMac.h" /* LoRaMacIsBusy() - ReadRFIDCard()'da MAC mesgulken bloklayici okumayi ertelemek icin */
 #include <stdlib.h>
 /* USER CODE END Includes */
 
@@ -407,6 +408,24 @@ static volatile bool join_in_progress = false;
 #define JOIN_TIMEOUT_MS 35000
 static UTIL_TIMER_Object_t JoinTimeoutTimer;
 
+/* RFID okuma, LoRaMAC bir TX/RX dongusunun ORTASINDAYKEN baslamaz - bkz
+ * ReadRFIDCard()'daki aciklama. MAC mesgulse okuma bu sure sonra tekrar denenir. */
+#define RFID_DEFER_DELAY_MS      300U
+/* Ust sinir: MAC (olasi baska bir nedenle) hic bosalmazsa buton sonsuza kadar
+ * islevsiz kalmasin - 40*300ms = 12 sn sonra yine de okuma yapilir. */
+#define RFID_DEFER_MAX_COUNT     40U
+static UTIL_TIMER_Object_t RfidDeferTimer;
+static uint8_t g_rfidDeferCount = 0U;
+
+/* Son batarya olcumu (STATUS turu ya da RFID oncesi kontrol). Her RFID
+ * okumasinda yeniden ADC olcumu (~110 ms bloklayici + bolucu akimi) yapmamak
+ * icin onbellek: olcum bu sureden eskiyse tekrar olculur. Batarya gerilimi
+ * dakikalar icinde anlamli degismez; olcum zaten RFID okuyucusu guclenmeden
+ * (yuk yokken) yapildigindan onbellekli deger de ayni anlami tasir. */
+#define RFID_BAT_CACHE_MAX_AGE_MS   600000U   /* 10 dk */
+static uint16_t g_lastBatMv = 0U;
+static uint32_t g_lastBatMeasMs = 0U;
+
 /* Uzaktan buzzer/LED komutu - bkz docs/eylem-plani.md madde 4. MUTLAK KURAL:
  * sunucu/yazilim hatasi ne isterse istesin, cihaz bu sureyi ASLA asmaz -
  * BuzzerLedSafetyTimer, komutun kendi istedigi sureden BAGIMSIZ olarak her
@@ -547,6 +566,7 @@ static const LoraTimerTaskBinding_t kIndPingBinding      = { CFG_SEQ_Task_IndPin
 static const LoraTimerTaskBinding_t kBuzzerLedSafetyBinding = { CFG_SEQ_Task_BuzzerLedSafetyEvent, CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kBuzzerLedToggleBinding = { CFG_SEQ_Task_BuzzerLedToggleEvent, CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kQueryReportBinding = { CFG_SEQ_Task_QueryReportEvent, CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kRfidDeferBinding = { CFG_SEQ_Task_ReadRFIDEvent, CFG_SEQ_Prio_0 };
 
 /**
   * @brief  Yukaridaki kStatusMsgBinding/kRfidAckTimeoutBinding/... sabitlerinden
@@ -630,6 +650,7 @@ void LoRaWAN_Init(void)
 
   UTIL_TIMER_Create(&JoinRetryTimer, JOIN_RETRY_DELAY, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinRetryBinding);
   UTIL_TIMER_Create(&JoinTimeoutTimer, JOIN_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinTimeoutBinding);
+  UTIL_TIMER_Create(&RfidDeferTimer, RFID_DEFER_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kRfidDeferBinding);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_JoinTimeoutEvent), UTIL_SEQ_RFU, JoinTimeoutHandler);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LmHandlerProcess), UTIL_SEQ_RFU, LmHandlerProcess);
 
@@ -752,6 +773,11 @@ static void OnStatusMessageHandler(void)
 	  StatusMsgPreventStopMode();
 	  int16_t bat_temp_q8_8 = 0;
 	  uint16_t bat_adc_val = adc_conv_get_battery_volatge(&bat_temp_q8_8);
+	  if (bat_adc_val != 0U)
+	  {
+		  g_lastBatMv = bat_adc_val;
+		  g_lastBatMeasMs = UTIL_TIMER_GetCurrentTime();
+	  }
 	  APP_LOG(TS_OFF, VLEVEL_M,"Battery ADC Value:%d mV, Temp:%d.%02d C\r\n",
 	          bat_adc_val, bat_temp_q8_8 >> 8, (int)((bat_temp_q8_8 & 0xFF) * 100 / 256));
 	  StatusMsgAllowStopMode();
@@ -1549,9 +1575,53 @@ static void ReadRFIDCard(void) {
 		APP_LOG(TS_OFF, VLEVEL_M, "###### Onceki RFID gonderimi hala ACK bekliyor, yeni okuma reddedildi\r\n");
 		return;
 	}
+	/* KRITIK: LoRaMAC bir TX'in "txDone" ISR'i ile RX1/RX2 pencerelerini
+	 * kuran ProcessRadioTxDone() arasinda sequencer task'ina (LmHandlerProcess)
+	 * ihtiyac duyar: ProcessRadioTxDone, RX1/RX2 timer'larini
+	 * "RxWindowDelay - (simdi - txDone zamani)" ile kurar. Bu task, ~2-5 sn suren
+	 * BLOKLAYICI bir RFID okumasinin ardinda beklerse fark RxWindowDelay'i
+	 * (~1 sn) asar, uint32 tasar ve RX1/RX2 timer'lari ~gunlerce sonraya
+	 * kurulur: MAC sonsuza kadar TX_RUNNING/busy kalir, her LmHandlerSend()
+	 * BUSY(-2) dondurur, LmHandlerStop() (rejoin) de basarisiz olur - cihaz
+	 * reset'e kadar kilitlenir (sahada gozlemlendi: butona art arda basilip
+	 * IND ping TX'inin hemen ardindan okuma baslayinca). Cozum: MAC mesgulken
+	 * (TX/RX penceresi suruyor) bloklayici okumaya HIC baslama, kisa sure
+	 * sonra tekrar dene.
+	 * NOT: Bu kontrol batarya olcumunden ONCE yapilir - aksi halde her erteleme
+	 * denemesinde (300 ms) gereksiz bir ADC olcumu (~110 ms bloklayici) calisir. */
+	if (LoRaMacIsBusy() && (g_rfidDeferCount < RFID_DEFER_MAX_COUNT))
 	{
-		int16_t lowBatTempQ8_8 = 0;
-		uint16_t lowBatMv = adc_conv_get_battery_volatge(&lowBatTempQ8_8);
+		g_rfidDeferCount++;
+		if (g_rfidDeferCount == 1U)
+		{
+			APP_LOG(TS_OFF, VLEVEL_M, "###### MAC mesgul (TX/RX penceresi), RFID okumasi ertelendi\r\n");
+		}
+		UTIL_TIMER_Start(&RfidDeferTimer);
+		return;
+	}
+	if (g_rfidDeferCount != 0U)
+	{
+		APP_LOG(TS_OFF, VLEVEL_M, "###### RFID okumasi %u kez ertelendi, simdi basliyor\r\n",
+				(unsigned int)g_rfidDeferCount);
+		g_rfidDeferCount = 0U;
+	}
+	{
+		/* Onbellekli batarya degeri taze degilse (ya da hic olculmediyse)
+		 * olc; aksi halde ADC'ye hic dokunma. */
+		if ((g_lastBatMv == 0U) ||
+			((UTIL_TIMER_GetCurrentTime() - g_lastBatMeasMs) >= RFID_BAT_CACHE_MAX_AGE_MS))
+		{
+			int16_t lowBatTempQ8_8 = 0;
+			uint16_t measuredMv = adc_conv_get_battery_volatge(&lowBatTempQ8_8);
+			if (measuredMv != 0U)
+			{
+				g_lastBatMv = measuredMv;
+				g_lastBatMeasMs = UTIL_TIMER_GetCurrentTime();
+			}
+			/* measuredMv==0: ADC olcumu basarisiz (kalibrasyon/okuma hatasi) -
+			 * bunu "dusuk batarya" saymayip okumayi engellemiyoruz. */
+		}
+		uint16_t lowBatMv = (g_lastBatMv != 0U) ? g_lastBatMv : 0xFFFFU;
 		if (lowBatMv < RFID_READ_MIN_BATTERY_MV)
 		{
 			APP_LOG(TS_OFF, VLEVEL_M,
