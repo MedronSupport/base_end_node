@@ -90,7 +90,7 @@ typedef enum
   CFG_SEQ_Task_JoinTimeoutEvent,
   CFG_SEQ_Task_RfidAckRetryEvent,
   CFG_SEQ_Task_WatchdogKickEvent,
-  CFG_SEQ_Task_IndPingEvent,
+  CFG_SEQ_Task_LwPingEvent,
   CFG_SEQ_Task_BuzzerLedSafetyEvent,
   CFG_SEQ_Task_BuzzerLedToggleEvent,
   CFG_SEQ_Task_QueryReportEvent,

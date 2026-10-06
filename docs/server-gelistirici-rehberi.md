@@ -90,7 +90,7 @@ Her uplink payload'ının ilk 2 byte'ı ortaktır: `[0]=uplink counter (0-255 ar
 
 **Amaç:** Bir RFID kartının okunduğu anı canlı olarak bildirir. Aynı format, daha önce teslim edilemeyip cihazın kalıcı belleğinde bekleyen bir kaydın **yeniden gönderilmesinde** de kullanılır — sunucu tarafında bu iki durumu ayırt etmenin yolu, `[2:6]` ile `[14:18]`'in aynı/farklı olmasıdır (retry'lerde farklıdır). **Confirmed** olarak gönderilir.
 
-### 4.3 IND (Indication) — Tip `0x22` (6 byte)
+### 4.3 lw_ping — Tip `0x22` (6 byte)
 
 | Byte | Alan | Açıklama |
 |---|---|---|
@@ -198,7 +198,7 @@ Cihazın kendi saati **bağımsız olarak doğru değildir** — düzenli sunucu
 1. Her **STATUS** (`0x27`) uplink'i alındığında, sunucu **mümkün olduğunca hızlı**, o mesajın `[6:10]` alanındaki status sayacını **aynen** taşıyan bir zaman senkron downlink'i kuyruğa almalıdır.
 2. Cihaz, gelen sayacı **kendi en son gönderdiği** status sayacıyla karşılaştırır — **birebir eşleşmiyorsa** yanıt sessizce reddedilir. Bu, gecikmiş/bayat bir yanıtın yanlışlıkla kabul edilmesini önler.
 3. Sayaç eşleşse bile, taşınan zaman cihazın **zaten bildiği zamandan anlamlı ölçüde geriye** gidiyorsa (ağ gecikmesi kaynaklı, çok bayat bir yanıt olabilir) yine reddedilir — gerçek RTC sapmasına izin verecek şekilde, geçen süreyle orantılı bir tolerans uygulanır.
-4. **Class A kısıtı:** Downlink yalnızca bir uplink'in hemen ardından açılan RX penceresinde teslim edilebilir. Sunucu yanıtı kuyruğa almakta gecikirse (o STATUS'un kendi penceresini kaçırırsa), yanıt ancak **bir sonraki** uplink fırsatında (başka bir STATUS/kart okuma/IND mesajı) teslim edilebilir — bu noktada sayaç muhtemelen ilerlemiş olacağından yanıt **reddedilecektir**. Bu yüzden düşük gecikme kritik önemdedir.
+4. **Class A kısıtı:** Downlink yalnızca bir uplink'in hemen ardından açılan RX penceresinde teslim edilebilir. Sunucu yanıtı kuyruğa almakta gecikirse (o STATUS'un kendi penceresini kaçırırsa), yanıt ancak **bir sonraki** uplink fırsatında (başka bir STATUS/kart okuma/lw_ping mesajı) teslim edilebilir — bu noktada sayaç muhtemelen ilerlemiş olacağından yanıt **reddedilecektir**. Bu yüzden düşük gecikme kritik önemdedir.
 5. **Join anında:** Cihaz her başarılı (re)join'de kendi status sayacını **0**'a sıfırlar. Sunucu, join event'i aldığında status sayacı **0** ile bir zaman senkron yanıtı göndermelidir — bu, ilk STATUS'tan önce bile cihazın saatini makul bir başlangıç noktasına getirir. Bu özel durumda, kritik/tek seferlik olduğu için **confirmed** downlink kullanılması önerilir.
 6. **Confirmed kullanma tercihi:** Rutin (STATUS-tetikli) zaman senkron yanıtlarının **unconfirmed** gönderilmesi önerilir — confirmed bir downlink, cihazın otomatik olarak ekstra bir ACK-uplink'i göndermesine yol açar, bu da sırada bekleyen başka bir confirmed downlink'i tetikleyip beklenmedik bir zincirlemeye (kaskad) neden olabilir.
 

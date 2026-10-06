@@ -244,7 +244,7 @@ Arka plan: `docs/Sorunlar/mac_mesgul_rx_pencere_alttasma_sorunu.md`.
 - **Beklenen:** Her TX'ten sonra `RX_1`/`RX_2` veya `rxDone` + `Tx Data Rate` satırı; `SEND FAILED (-2)` kalıcı olarak görülmez; basımlar ACK beklerken `yeni okuma reddedildi` ile reddedilir.
 
 ### L2 — MAC meşgulken okuma erteleme
-- **Adımlar:** STATUS veya IND ping TX'i sürerken butona bas.
+- **Adımlar:** STATUS veya lw_ping TX'i sürerken butona bas.
 - **Beklenen:** `MAC mesgul (TX/RX penceresi), RFID okumasi ertelendi`, ardından `RFID okumasi N kez ertelendi, simdi basliyor`; sonrasında RX pencereleri normal açılır.
 
 ### L3 — Pencere gecikmesi underflow koruması

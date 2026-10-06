@@ -28,5 +28,10 @@ Düşük batarya koruması (`RFID_READ_MIN_BATTERY_MV = 2800`) her kart okuması
 - Yoğun buton testinde (≈18 uplink) tümünde `ACK alindi`, `SEND FAILED` yok; kaçırılan RX penceresinde MAC kendi retry'ıyla ACK aldı.
 - STATUS aralığı ≈ 1 saat (`sayac=0` → `sayac=1`); ADC yalnızca STATUS'ta ve önbellek süresi dolduktan sonraki ilk okumada çalışıyor.
 
-## Bilinen zararsız davranış
-Bir TX döngüsü sürerken IND ping denenirse tek seferlik `IND ping gonderilemedi (-2)` görülebilir. Ping kritik değildir; RFID verisi `persistent_circular_buffer` ile korunur. Henüz test edilmeyen yol: `MAC mesgul ... ertelendi` logu (erteleme dalı) son iki logda tetiklenmedi.
+## lw_ping / canlı RFID gönderimi çakışması (düzeltildi)
+Kart okunamayan bir okumadan sonra kurulan `LwPingDelayTimer` (3 sn), bir sonraki (bloklayıcı) okuma sırasında dolup ping görevi bekliyor; okuma bitince ping, canlı RFID gönderiminden önce çalışıp MAC'i meşgul ediyor ve canlı gönderim `SEND FAILED (-2)` alıyordu (veri RAM buffer'a düşüp ~16 sn sonra gidiyordu).
+
+Çözüm (`lora_app.c`): lw_ping **aynen gönderilir** (kart okunmayan okumalarda sunucuya ek RX penceresi sağlama amacı korunur). Bunun yerine `SendRFID_Data()` canlı gönderimden hemen önce `LoRaMacIsBusy()` kontrolü yapar; MAC meşgulse gönderimi `RfidSendDeferTimer` ile 200 ms aralıkla (en çok 40 kez ≈ 8 sn) erteler ve `-2` ile buffer'a düşmesini önler. Ertelenen gönderimde kartın okunma zamanı (`g_lastSentTimestamp`) korunur; bekleme sırasında yeni okuma `ReadRFIDCard()` tarafından reddedilir (kart üzerine yazılmasın). Beklenen log: `MAC mesgul, canli RFID gonderimi ertelendi` → `Canli RFID gonderimi N kez ertelendi, simdi gonderiliyor`.
+
+## Test edilen ve bilinen davranış
+Erteleme dalı (`MAC mesgul ... ertelendi` → `RFID okumasi N kez ertelendi, simdi basliyor`) 10:31'deki buton yağmuru testinde doğrulandı (N = 6–15, sınır 40'ın altında). Ping ile çakışan canlı gönderim artık ~2 sn gecikmeyle (ping bitince) doğrudan gider, buffer'a düşmez.

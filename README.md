@@ -50,7 +50,7 @@ Tüm mesajlar `LORAWAN_USER_APP_PORT` (2) üzerinden, uplink'lerde `Buffer[0]` =
 | 6:9 | status sayacı — sunucunun zaman senkron yanıtında **aynen** geri göndermesi gereken tazelik anahtarı |
 | 10:13 | gönderim anındaki güncel epoch tahmini |
 
-**IND ping** (`LORA_RFID_MSG_TYPE_IND = 0x22`, 6 byte, unconfirmed): veri taşımayan, ek bir RX penceresi açmak için gönderilen yoklama mesajı. Bir STATUS'un ACK sonucu belli olduktan ~3 sn sonra ve boş kalan (kart bulunamayan) bir okuma denemesinin ardından tetiklenir — sunucunun kuyrukladığı bir downlink'e (zaman senkronu, komut) ekstra teslim fırsatı sağlar.
+**lw_ping** (`LORA_RFID_MSG_TYPE_LW_PING = 0x22`, 6 byte, unconfirmed): veri taşımayan, ek bir RX penceresi açmak için gönderilen yoklama mesajı. Bir STATUS'un ACK sonucu belli olduktan ~3 sn sonra ve boş kalan (kart bulunamayan) bir okuma denemesinin ardından tetiklenir — sunucunun kuyrukladığı bir downlink'e (zaman senkronu, komut) ekstra teslim fırsatı sağlar.
 | Byte | Alan |
 |---|---|
 | 0 | uplink counter |

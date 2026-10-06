@@ -10,17 +10,17 @@ Bu dosya, `docs/urun-yol-haritasi.md`'deki tartışmadan çıkan somut adımlar�
 
 **Uygulanan tasarım:**
 - Mevcut STATUS mesajı (confirmed, 14 byte) **hiç değişmedi** — zaman senkron mekanizması dahil, sıfır risk.
-- STATUS'un ACK sonucu (başarılı YA DA başarısız) belli olduktan **3 saniye sonra** (`IND_PING_DELAY_MS`), yeni bir oneshot timer (`IndPingDelayTimer`) ikinci, hafif bir uplink tetikliyor: `SendIndPingHandler()` (madde 2'de bu mekanizma genelleştirilip ikinci bir tetikleyiciyle de paylaşıldı, aşağıya bkz.).
-- İkinci parça **unconfirmed** (`LORAMAC_HANDLER_UNCONFIRMED_MSG`) — ACK beklemiyor, sadece TX+RX1/RX2 ile bir fırsat daha açıyor. Zaten dokümante edilmiş ama hiç kullanılmamış `LORA_RFID_MSG_TYPE_IND` (0x22) tipini kullanıyor.
+- STATUS'un ACK sonucu (başarılı YA DA başarısız) belli olduktan **3 saniye sonra** (`LW_PING_DELAY_MS`), yeni bir oneshot timer (`LwPingDelayTimer`) ikinci, hafif bir uplink tetikliyor: `SendLwPingHandler()` (madde 2'de bu mekanizma genelleştirilip ikinci bir tetikleyiciyle de paylaşıldı, aşağıya bkz.).
+- İkinci parça **unconfirmed** (`LORAMAC_HANDLER_UNCONFIRMED_MSG`) — ACK beklemiyor, sadece TX+RX1/RX2 ile bir fırsat daha açıyor. Zaten dokümante edilmiş ama hiç kullanılmamış `LORA_RFID_MSG_TYPE_LW_PING` (0x22) tipini kullanıyor.
 - Payload minimal (6 byte): `[0]=uplink counter, [1]=tip(0x22), [2:5]=gönderim anı epoch`.
 - Mevcut mutual-exclusion guard'larına uyuyor (`rfid_data_pending_on_lora`/`buffered_rfid_data_wait_for_ack`/`status_data_pending_on_lora` devam ederken atlanır) ve join kontrolü var.
 - Hem ACK-başarılı hem ACK-başarısız dalından tetikleniyor (`OnTxData()`), böylece STATUS'un kendisi başarısız olsa bile ek bir fırsat kaçırılmıyor.
 
-**Değişen dosyalar:** `Core/Inc/utilities_def.h` (yeni `CFG_SEQ_Task_IndPingEvent`), `LoRaWAN/App/lora_app.c` (timer, binding, handler, iki tetikleme noktası).
+**Değişen dosyalar:** `Core/Inc/utilities_def.h` (yeni `CFG_SEQ_Task_LwPingEvent`), `LoRaWAN/App/lora_app.c` (timer, binding, handler, iki tetikleme noktası).
 
 **Bilinçli sınırlamalar (madde 2/3 ile tamamlanacak):** Bu, sadece STATUS turunun ANINDAKİ fırsat sayısını 1'den 2'ye çıkarıyor — STATUS turları arası (~1 saat) hâlâ sıfır fırsat var, en kötü durum gecikmesi değişmedi. Asıl gecikme iyileştirmesi madde 2 (boş basımda RX penceresi) ve madde 3'ten (komut protokolü) gelecek.
 
-**Test edilmesi gereken:** Sahada bir STATUS turunda loglarda `"IND ping kuyruga alindi"` satırının STATUS'un ACK/fail sonucundan ~3 sn sonra göründüğünü doğrula; duty-cycle/pil etkisini birkaç gün gözlemle.
+**Test edilmesi gereken:** Sahada bir STATUS turunda loglarda `"lw_ping kuyruga alindi"` satırının STATUS'un ACK/fail sonucundan ~3 sn sonra göründüğünü doğrula; duty-cycle/pil etkisini birkaç gün gözlemle.
 
 ---
 
@@ -29,14 +29,14 @@ Bu dosya, `docs/urun-yol-haritasi.md`'deki tartışmadan çıkan somut adımlar�
 **Amaç:** Kart okunamayan buton basımlarını da bir uplink fırsatına çevirmek (aktif kullanım saatlerinde komut gecikmesini azaltır, ekstra timer gerektirmez).
 
 **Uygulanan tasarım — madde 1'in altyapısıyla birleştirildi:**
-- Madde 1 için yazılan `SendIndPingHandler()`/`IndPingDelayTimer` mekanizması genel bir "RX penceresi açmak için hafif IND ping'i" altyapısına dönüştürüldü (isimler `SendStatusPart2Handler` → `SendIndPingHandler`, `StatusPart2DelayTimer` → `IndPingDelayTimer` olarak genelleştirildi) — iki ayrı olay aynı mekanizmayı paylaşıyor.
-- `SendRFID_Data()`'nın "kart okunamadı" dalına, buffer kontrolünü tetikleyen satırın hemen ardına `UTIL_TIMER_Start(&IndPingDelayTimer);` eklendi.
-- **Çakışma yönetimi bilinçli tasarım:** Buffer'da gönderilecek bir kayıt VARSA, `SendBufferedRfidLogHandler` zaten bir gönderim başlatıp `buffered_rfid_data_wait_for_ack`'i true yapıyor — 3 sn sonra çalışan IND ping bunu görüp kendiliğinden atlanıyor (mutual-exclusion guard'ı zaten böyle tasarlanmıştı). Buffer BOŞSA (asıl hedeflenen senaryo), hiçbir şey çakışmıyor ve IND ping gerçekten gönderiliyor.
-- `0x22 IND` mesaj tipi kullanıldı — madde 1'deki ile aynı 6 byte'lık minimal payload (`[0]=counter, [1]=0x22, [2:5]=epoch`).
+- Madde 1 için yazılan `SendLwPingHandler()`/`LwPingDelayTimer` mekanizması genel bir "RX penceresi açmak için hafif lw_ping'i" altyapısına dönüştürüldü (isimler `SendStatusPart2Handler` → `SendLwPingHandler`, `StatusPart2DelayTimer` → `LwPingDelayTimer` olarak genelleştirildi) — iki ayrı olay aynı mekanizmayı paylaşıyor.
+- `SendRFID_Data()`'nın "kart okunamadı" dalına, buffer kontrolünü tetikleyen satırın hemen ardına `UTIL_TIMER_Start(&LwPingDelayTimer);` eklendi.
+- **Çakışma yönetimi bilinçli tasarım:** Buffer'da gönderilecek bir kayıt VARSA, `SendBufferedRfidLogHandler` zaten bir gönderim başlatıp `buffered_rfid_data_wait_for_ack`'i true yapıyor — 3 sn sonra çalışan lw_ping bunu görüp kendiliğinden atlanıyor (mutual-exclusion guard'ı zaten böyle tasarlanmıştı). Buffer BOŞSA (asıl hedeflenen senaryo), hiçbir şey çakışmıyor ve lw_ping gerçekten gönderiliyor.
+- `0x22 lw_ping` mesaj tipi kullanıldı — madde 1'deki ile aynı 6 byte'lık minimal payload (`[0]=counter, [1]=0x22, [2:5]=epoch`).
 
 **Değişen dosyalar:** `LoRaWAN/App/lora_app.c` (`SendRFID_Data()`'ya 1 satır + yorum, ayrıca madde 1'in isimlendirmesi genelleştirildi).
 
-**Ertelenen/yapılmayan:** "Kart okunamadı" olayının gerçek sıklığını loglardan çıkarıp pil maliyetini ölçme adımı — bu, sahadan yeni loglar geldikçe ayrıca değerlendirilecek, şimdilik mekanizma zaten var olan mutual-exclusion ile kendini sınırlıyor (aynı anda sadece bir IND ping denemesi olabilir, buffer/RFID/status meşgulken atlanıyor).
+**Ertelenen/yapılmayan:** "Kart okunamadı" olayının gerçek sıklığını loglardan çıkarıp pil maliyetini ölçme adımı — bu, sahadan yeni loglar geldikçe ayrıca değerlendirilecek, şimdilik mekanizma zaten var olan mutual-exclusion ile kendini sınırlıyor (aynı anda sadece bir lw_ping denemesi olabilir, buffer/RFID/status meşgulken atlanıyor).
 
 **Durum:** Onaylandı, tasarım detayları netleşince uygulanabilir.
 

@@ -138,11 +138,11 @@ typedef enum
 
 /* Exported macros -----------------------------------------------------------*/
 /* USER CODE BEGIN EM */
-//type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:ind
+//type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:lw_ping
 #define LORA_RFID_MSG_TYPE_LIVE_UID 	 0x45
 #define LORA_RFID_MSG_TYPE_STORED_UID 	 0x54
 #define LORA_RFID_MSG_TYPE_STATUS 		 0x27
-#define LORA_RFID_MSG_TYPE_IND			 0x22
+#define LORA_RFID_MSG_TYPE_LW_PING			 0x22
 
 /* Sunucudan gelen komut downlink'i (port LORAWAN_USER_APP_PORT):
  *   [0] = 0x02 (LORA_COMMAND_DOWNLINK_TYPE)

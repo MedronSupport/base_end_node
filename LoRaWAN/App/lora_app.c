@@ -252,7 +252,7 @@ static void ResendRfidData(void);
 static void StatusMsgPreventStopMode(void);
 static void  StatusMsgAllowStopMode(void);
 static void OnStatusMessageHandler(void);
-static void SendIndPingHandler(void);
+static void SendLwPingHandler(void);
 static void BuzzerLedAllOff(void);
 static void BuzzerLedSafetyStopHandler(void);
 static void BuzzerLedToggleHandler(void);
@@ -372,13 +372,13 @@ static UTIL_TIMER_Object_t BufferedDrainDelayTimer;
 #define BUFFERED_DRAIN_DELAY_MS 10000
 /* Iki ayri olaydan (STATUS'un ACK sonucu belli olunca, ya da buton basilip
  * kart okunamayinca) bu kadar sonra, ek bir RX penceresi acmak icin hafif
- * (unconfirmed) bir "IND" mesaji gonderilir - bkz SendIndPingHandler().
+ * (unconfirmed) bir "lw_ping" mesaji gonderilir - bkz SendLwPingHandler().
  * Amaci veri tasimak degil, sunucunun kuyrukladigi bir downlink'e (komut,
  * zaman senkron) daha once fark etmeyecegi bir firsat daha vermek - bkz
  * docs/eylem-plani.md madde 1 ve 2. Radyo/LoRaMAC'in bir onceki alisverisin
  * kuyrugunu toplamasi icin kisa bir pay birakiyoruz. */
-static UTIL_TIMER_Object_t IndPingDelayTimer;
-#define IND_PING_DELAY_MS 3000
+static UTIL_TIMER_Object_t LwPingDelayTimer;
+#define LW_PING_DELAY_MS 3000
 static uint8_t AppDataBuffer[LORAWAN_APP_DATA_BUFFER_MAX_SIZE];
 /**
   * @brief User application data structure
@@ -416,6 +416,13 @@ static UTIL_TIMER_Object_t JoinTimeoutTimer;
 #define RFID_DEFER_MAX_COUNT     40U
 static UTIL_TIMER_Object_t RfidDeferTimer;
 static uint8_t g_rfidDeferCount = 0U;
+/* Canli RFID gonderimi MAC meshgulken (ornegin lw_ping TX/RX penceresi suruyor)
+ * -2 ile dusup buffer'a gitmesin diye kisa araliklarla ertelenir. Ping aynen
+ * gonderilir; sadece canli gonderim onun bitmesini bekler (~2 sn). */
+#define RFID_SEND_DEFER_DELAY_MS   200U
+#define RFID_SEND_DEFER_MAX_COUNT  40U
+static UTIL_TIMER_Object_t RfidSendDeferTimer;
+static uint8_t g_rfidSendDeferCount = 0U;
 
 /* Son batarya olcumu (STATUS turu ya da RFID oncesi kontrol). Her RFID
  * okumasinda yeniden ADC olcumu (~110 ms bloklayici + bolucu akimi) yapmamak
@@ -562,11 +569,12 @@ static const LoraTimerTaskBinding_t kBufferedDrainBinding    = { CFG_SEQ_Task_Se
 static const LoraTimerTaskBinding_t kRfidAckRetryBinding     = { CFG_SEQ_Task_RfidAckRetryEvent,      CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kJoinRetryBinding        = { CFG_SEQ_Task_LoRaRejoinEvent,        CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kJoinTimeoutBinding      = { CFG_SEQ_Task_JoinTimeoutEvent,       CFG_SEQ_Prio_0 };
-static const LoraTimerTaskBinding_t kIndPingBinding      = { CFG_SEQ_Task_IndPingEvent,       CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kLwPingBinding      = { CFG_SEQ_Task_LwPingEvent,       CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kBuzzerLedSafetyBinding = { CFG_SEQ_Task_BuzzerLedSafetyEvent, CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kBuzzerLedToggleBinding = { CFG_SEQ_Task_BuzzerLedToggleEvent, CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kQueryReportBinding = { CFG_SEQ_Task_QueryReportEvent, CFG_SEQ_Prio_0 };
 static const LoraTimerTaskBinding_t kRfidDeferBinding = { CFG_SEQ_Task_ReadRFIDEvent, CFG_SEQ_Prio_0 };
+static const LoraTimerTaskBinding_t kRfidSendDeferBinding = { CFG_SEQ_Task_SendRFIDEvent, CFG_SEQ_Prio_0 };
 
 /**
   * @brief  Yukaridaki kStatusMsgBinding/kRfidAckTimeoutBinding/... sabitlerinden
@@ -634,8 +642,8 @@ void LoRaWAN_Init(void)
   UTIL_TIMER_Create(&RetryStatusTimer, RETRY_STATUS_TIMEOUT, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kStatusMsgBinding);
 
   //status part2 (ek RX penceresi) - bkz docs/eylem-plani.md madde 1
-  UTIL_TIMER_Create(&IndPingDelayTimer, IND_PING_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kIndPingBinding);
-  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_IndPingEvent), UTIL_SEQ_RFU, SendIndPingHandler);
+  UTIL_TIMER_Create(&LwPingDelayTimer, LW_PING_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kLwPingBinding);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LwPingEvent), UTIL_SEQ_RFU, SendLwPingHandler);
 
   //buzzer/led komutu - bkz docs/eylem-plani.md madde 4
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_BuzzerLedSafetyEvent), UTIL_SEQ_RFU, BuzzerLedSafetyStopHandler);
@@ -651,6 +659,7 @@ void LoRaWAN_Init(void)
   UTIL_TIMER_Create(&JoinRetryTimer, JOIN_RETRY_DELAY, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinRetryBinding);
   UTIL_TIMER_Create(&JoinTimeoutTimer, JOIN_TIMEOUT_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kJoinTimeoutBinding);
   UTIL_TIMER_Create(&RfidDeferTimer, RFID_DEFER_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kRfidDeferBinding);
+  UTIL_TIMER_Create(&RfidSendDeferTimer, RFID_SEND_DEFER_DELAY_MS, UTIL_TIMER_ONESHOT, OnTimerFiresSetTask, (void *)&kRfidSendDeferBinding);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_JoinTimeoutEvent), UTIL_SEQ_RFU, JoinTimeoutHandler);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LmHandlerProcess), UTIL_SEQ_RFU, LmHandlerProcess);
 
@@ -829,26 +838,26 @@ static void OnStatusMessageHandler(void)
 }
 
 /**
-  * @brief  Hafif (unconfirmed), 6 byte'lik bir "IND" mesaji gonderip ek bir
+  * @brief  Hafif (unconfirmed), 6 byte'lik bir "lw_ping" mesaji gonderip ek bir
   *         RX penceresi acar - kritik veri tasimaz, tek amaci sunucunun
   *         kuyrukladigi bir downlink'e (komut, zaman senkron) bir sans daha
-  *         vermek. Iki ayri olaydan IND_PING_DELAY_MS gecikmeyle tetiklenir:
+  *         vermek. Iki ayri olaydan LW_PING_DELAY_MS gecikmeyle tetiklenir:
   *           1) STATUS'un ACK sonucu (basarili/basarisiz) belli olunca (bkz OnTxData)
   *           2) Buton basilip kart okunamayinca (bkz SendRFID_Data "else" dali)
   */
-static void SendIndPingHandler(void)
+static void SendLwPingHandler(void)
 {
 	if (rfid_data_pending_on_lora || buffered_rfid_data_wait_for_ack || status_data_pending_on_lora)
 	{
 		/* Baska bir gonderim araya girdi - AppData paylasimli oldugu icin
 		 * atlıyoruz. Kritik bir veri tasimadigi icin kaybedilmesi sorun
 		 * degil, bir sonraki firsatta tekrar denenecek. */
-		APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping atlandi - baska bir gonderim devam ediyor\r\n");
+		APP_LOG(TS_OFF, VLEVEL_M, "###### lw_ping atlandi - baska bir gonderim devam ediyor\r\n");
 		return;
 	}
 	if (LmHandlerJoinStatus() != LORAMAC_HANDLER_SET)
 	{
-		APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping atlandi - join yok\r\n");
+		APP_LOG(TS_OFF, VLEVEL_M, "###### lw_ping atlandi - join yok\r\n");
 		return;
 	}
 
@@ -856,20 +865,20 @@ static void SendIndPingHandler(void)
 
 	AppData.Port = LORAWAN_USER_APP_PORT;
 	AppData.Buffer[0] = UplinkCounter++;
-	AppData.Buffer[1] = LORA_RFID_MSG_TYPE_IND;
+	AppData.Buffer[1] = LORA_RFID_MSG_TYPE_LW_PING;
 	WriteU32BE(&AppData.Buffer[2], nowEpoch);
 	AppData.BufferSize = 6;
 
-	APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping gonderiliyor, epoch=%u\r\n", (unsigned int)nowEpoch);
+	APP_LOG(TS_OFF, VLEVEL_M, "###### lw_ping gonderiliyor, epoch=%u\r\n", (unsigned int)nowEpoch);
 
 	LmHandlerErrorStatus_t sendStatus = LmHandlerSend(&AppData, LORAMAC_HANDLER_UNCONFIRMED_MSG, false);
 	if (LORAMAC_HANDLER_SUCCESS == sendStatus)
 	{
-		APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping kuyruga alindi - ek RX penceresi\r\n");
+		APP_LOG(TS_OFF, VLEVEL_M, "###### lw_ping kuyruga alindi - ek RX penceresi\r\n");
 	}
 	else
 	{
-		APP_LOG(TS_OFF, VLEVEL_M, "###### IND ping gonderilemedi (%d)\r\n", (int)sendStatus);
+		APP_LOG(TS_OFF, VLEVEL_M, "###### lw_ping gonderilemedi (%d)\r\n", (int)sendStatus);
 	}
 }
 
@@ -1318,7 +1327,7 @@ static void SendBufferedRfidLogHandler(void) {
 		/* 18 byte payload:
 		 *
 		 *   [0]   	uplink counter
-		 *   [1]		type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:ind
+		 *   [1]		type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:lw_ping
 		 *   [2:5] 	kaydin timestamp'i (kart okunduğu an), 4 byte big endian
 		 *   [6]   	uid length
 		 *   [7:13]   uid - 7 byte big endian
@@ -1389,16 +1398,33 @@ static void SendBufferedRfidLogHandler(void) {
 }
 
 static void SendRFID_Data(void) {
-	APP_LOG(TS_OFF, VLEVEL_M, "###### Send RFID has triggered... \r\n");
+	if (g_rfidSendDeferCount == 0U) {
+		APP_LOG(TS_OFF, VLEVEL_M, "###### Send RFID has triggered... \r\n");
+	}
 	if (uuid_val_rfid.is_uuid_data_assigned) {
 
-		  uint32_t timestamp=LoraTimeSync_GetCurrentUnixTime();
-		APP_LOG(TS_OFF, VLEVEL_M, "###### New uuid to send \r\n");
+		  /* Ertelenmis yeniden giriste kartin okunma zamani korunur. */
+		  uint32_t timestamp = (g_rfidSendDeferCount != 0U) ? g_lastSentTimestamp : LoraTimeSync_GetCurrentUnixTime();
+		if (g_rfidSendDeferCount == 0U) {
+			APP_LOG(TS_OFF, VLEVEL_M, "###### New uuid to send \r\n");
+		}
 
 		  g_lastSentTimestamp = timestamp;
 		  memcpy(g_lastSentUid, (const void *)uuid_val_rfid.uid, MAXIMUM_LEN_UUID);
 		  g_lastSentUidLen = uuid_val_rfid.uuid_len;
 
+		if (LoRaMacIsBusy() && g_rfidSendDeferCount < RFID_SEND_DEFER_MAX_COUNT) {
+			g_rfidSendDeferCount++;
+			if (g_rfidSendDeferCount == 1U) {
+				APP_LOG(TS_OFF, VLEVEL_M, "###### MAC mesgul, canli RFID gonderimi ertelendi\r\n");
+			}
+			UTIL_TIMER_Start(&RfidSendDeferTimer);
+			return;
+		}
+		if (g_rfidSendDeferCount != 0U) {
+			APP_LOG(TS_OFF, VLEVEL_M, "###### Canli RFID gonderimi %u kez ertelendi, simdi gonderiliyor\r\n", (unsigned int)g_rfidSendDeferCount);
+			g_rfidSendDeferCount = 0U;
+		}
           if (buffered_rfid_data_wait_for_ack || status_data_pending_on_lora) {
                PersistFailedRfidSend();
                return;
@@ -1418,7 +1444,7 @@ static void SendRFID_Data(void) {
 		  /* 18 byte payload:
 		   *
 		   *   [0]   	uplink counter
-		   *   [1]		type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:ind
+		   *   [1]		type 0x45:live uid data,0x54:stored uid data, 0x27:status, 0x22:lw_ping
 		   *   [2:5] 	timestamp 4 byte big endian (kart okundugu an)
 		   *   [6]   	uid length
 		   *   [7:13]   uid - 7 byte  big endian
@@ -1493,12 +1519,12 @@ static void SendRFID_Data(void) {
 		/* Buton basildi ama kart okunamadi - buffer'da gonderilecek bir sey
 		 * varsa yukaridaki satir zaten bir RX firsati acacak (SendBufferedRfidLogHandler
 		 * gonderim yapar ve buffered_rfid_data_wait_for_ack'i true yapar, bu da
-		 * asagidaki IND ping'in guard'inda kendiliginden atlanmasini saglar).
+		 * asagidaki lw_ping'in guard'inda kendiliginden atlanmasini saglar).
 		 * Buffer BOSSA hicbir radyo islemi olmuyordu - bu firsat tamamen
-		 * kayboluyordu. Simdi her durumda IND ping'i planliyoruz; buffer
+		 * kayboluyordu. Simdi her durumda lw_ping'i planliyoruz; buffer
 		 * doluysa guard onu atlar, bossa asil faydayi saglar - bkz
 		 * docs/eylem-plani.md madde 2. */
-		UTIL_TIMER_Start(&IndPingDelayTimer);
+		UTIL_TIMER_Start(&LwPingDelayTimer);
 	}
 }
 
@@ -1571,7 +1597,7 @@ static void ResendRfidData(void)
 #define RFID_READ_MIN_BATTERY_MV   2800U
 
 static void ReadRFIDCard(void) {
-	if (rfid_data_pending_on_lora) {
+	if (rfid_data_pending_on_lora || g_rfidSendDeferCount != 0U) {
 		APP_LOG(TS_OFF, VLEVEL_M, "###### Onceki RFID gonderimi hala ACK bekliyor, yeni okuma reddedildi\r\n");
 		return;
 	}
@@ -1584,7 +1610,7 @@ static void ReadRFIDCard(void) {
 	 * kurulur: MAC sonsuza kadar TX_RUNNING/busy kalir, her LmHandlerSend()
 	 * BUSY(-2) dondurur, LmHandlerStop() (rejoin) de basarisiz olur - cihaz
 	 * reset'e kadar kilitlenir (sahada gozlemlendi: butona art arda basilip
-	 * IND ping TX'inin hemen ardindan okuma baslayinca). Cozum: MAC mesgulken
+	 * lw_ping TX'inin hemen ardindan okuma baslayinca). Cozum: MAC mesgulken
 	 * (TX/RX penceresi suruyor) bloklayici okumaya HIC baslama, kisa sure
 	 * sonra tekrar dene.
 	 * NOT: Bu kontrol batarya olcumunden ONCE yapilir - aksi halde her erteleme
@@ -1880,7 +1906,7 @@ static void OnTxData(LmHandlerTxParams_t *params)
 				status_data_pending_on_lora = false;
 				LoraTimeSync_OnStatusAckResult(false);
 				UTIL_TIMER_Start(&RetryStatusTimer);
-				UTIL_TIMER_Start(&IndPingDelayTimer);
+				UTIL_TIMER_Start(&LwPingDelayTimer);
 			}
 
 			if(rfid_data_pending_on_lora)
@@ -1968,7 +1994,7 @@ static void OnTxData(LmHandlerTxParams_t *params)
 				status_data_pending_on_lora = false;
 				LoraTimeSync_OnStatusAckResult(true);
 				UTIL_TIMER_Start(&BufferedDrainDelayTimer);
-				UTIL_TIMER_Start(&IndPingDelayTimer);
+				UTIL_TIMER_Start(&LwPingDelayTimer);
 			}
 
 			if (rfid_data_pending_on_lora) {
