@@ -31,6 +31,11 @@ LORA_RFID_MSG_TYPE_LW_PING        = 0x22
 LORA_RFID_MSG_TYPE_QUERY_RESULT = 0x46
 
 
+def _hex_spaced(b):
+    """bytes -> "AA BB CC" (bytes.hex(sep) Python 3.8+ ister; eski surumlerde de calissin diye elle)."""
+    return " ".join("%02X" % x for x in bytearray(b))
+
+
 def _fmt_epoch(v):
     """Unix epoch'u okunabilir bir tarihe cevirir - parse hatasinda ham
     sayiyi dondurur (tum decode fonksiyonlarinca paylasilan ortak yardimci)."""
@@ -489,14 +494,14 @@ def _print_downlink_format_banner():
     print("-" * 60)
     print("ORNEK MESAJLAR:")
     print(f"  buzzer 1 1 5      (sadece buzzer, bip-bip, 5 sn)")
-    print(f"    -> hex: {ornek1.hex(' ').upper()}")
+    print(f"    -> hex: {_hex_spaced(ornek1)}")
     print(f"       [02]=komut [01]=buzzer/led [01]=hedef:buzzer [01]=pattern:bip-bip [00 05]=5 sn")
     print(f"  buzzer 3 0 8      (buzzer+led, surekli, 8 sn)")
-    print(f"    -> hex: {ornek2.hex(' ').upper()}")
+    print(f"    -> hex: {_hex_spaced(ornek2)}")
     print(f"       [02]=komut [01]=buzzer/led [03]=hedef:ikisi [00]=pattern:surekli [00 08]=8 sn")
     print(f"  buzzer 1 0 300    (KAYIP CIHAZ SENARYOSU - 5 dakika istendi, cihazin azami siniri "
           f"{MAX_BUZZER_LED_DURATION_S} sn'yi test etmek icin)")
-    print(f"    -> hex: {ornek3.hex(' ').upper()}")
+    print(f"    -> hex: {_hex_spaced(ornek3)}")
     print(f"       Cihaz bunu kendi ic guvenlik siniriyla kirpar - UART logunda")
     print(f"       'istenen=300 sn, uygulanan={MAX_BUZZER_LED_DURATION_S * 1000} ms' gorulmeli.")
     print("=" * 60)
@@ -510,7 +515,7 @@ def _print_downlink_format_banner():
     print("  byte[6:10]= end_timestamp     <- buyuk-endian (MSB once), uint32, epoch (sn)")
     print("-" * 60)
     print(f"  query 1725100800 1725200800   (iki epoch ile)")
-    print(f"    -> hex: {ornek4.hex(' ').upper()}")
+    print(f"    -> hex: {_hex_spaced(ornek4)}")
     print(f"  query 2026-09-01 2026-09-02   (YYYY-MM-DD ile, o gunun 00:00'i)")
     print("-" * 60)
     print("SONUC MESAJI (cihazdan, 0x46 QUERY_RESULT, coklu batch halinde gelir):")
@@ -530,7 +535,7 @@ def _print_downlink_format_banner():
           "cihaz tarafinda REDDEDILIR (kirpma yok), mevcut ayar degismez.")
     print("-" * 60)
     print(f"  interval 3600     (1 saat - carpan=120)")
-    print(f"    -> hex: {ornek5.hex(' ').upper()}")
+    print(f"    -> hex: {_hex_spaced(ornek5)}")
     print(f"       [02]=komut [03]=status araligi [00 78]=carpan 120 (120*30=3600 sn)")
     print("  interval 300      (5 dakika - carpan=10)")
     print("  interval 90000    (25 saat - REDDEDILECEK, 24 saatlik siniri asiyor)")
